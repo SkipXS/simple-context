@@ -71,6 +71,15 @@ function shellQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+function configuredShell() {
+  return (process.env.MINI_SANDBOX_SHELL ?? "").toLowerCase();
+}
+
+function isPowerShellConfigured() {
+  const shell = configuredShell();
+  return shell.includes("powershell") || shell.includes("pwsh");
+}
+
 async function pathExists(filePath) {
   try {
     await import("node:fs/promises").then((fs) => fs.stat(filePath));
@@ -113,14 +122,14 @@ try {
 
   const ok = await request("tools/call", {
     name: "sandbox_run",
-    arguments: { command: `${shellQuote(process.execPath)} -e "console.log('ok')"` },
+    arguments: { command: isPowerShellConfigured() ? "Write-Output ok" : `${shellQuote(process.execPath)} -e "console.log('ok')"` },
   });
-  assert.equal(ok.result.content[0].text, "ok\n");
+  assert.equal(ok.result.content[0].text.trim(), "ok");
   assert.equal(ok.result._meta.truncated, false);
   assert.equal(typeof ok.result._meta.durationMs, "number");
   assert.equal(typeof ok.result._meta.shell, "string");
 
-  if ((process.env.MINI_SANDBOX_SHELL ?? "").includes("bash")) {
+  if (configuredShell().includes("bash")) {
     const bashOnly = await request("tools/call", {
       name: "sandbox_run",
       arguments: { command: "printf 'configured-bash-ok\\n'" },
@@ -128,7 +137,7 @@ try {
     assert.equal(bashOnly.result.content[0].text.trim(), "configured-bash-ok");
   }
 
-  if ((process.env.MINI_SANDBOX_SHELL ?? "").toLowerCase().includes("cmd")) {
+  if (configuredShell().includes("cmd")) {
     const cmdOnly = await request("tools/call", {
       name: "sandbox_run",
       arguments: { command: "echo configured-cmd-ok" },
@@ -136,21 +145,29 @@ try {
     assert.equal(cmdOnly.result.content[0].text.trim(), "configured-cmd-ok");
   }
 
+  if (isPowerShellConfigured()) {
+    const powershellOnly = await request("tools/call", {
+      name: "sandbox_run",
+      arguments: { command: "Write-Output configured-powershell-ok" },
+    });
+    assert.equal(powershellOnly.result.content[0].text.trim(), "configured-powershell-ok");
+  }
+
   const failed = await request("tools/call", {
     name: "sandbox_run",
-    arguments: { command: `${shellQuote(process.execPath)} -e "process.exit(7)"` },
+    arguments: { command: isPowerShellConfigured() ? "exit 7" : `${shellQuote(process.execPath)} -e "process.exit(7)"` },
   });
   assert.equal(failed.error.code, -32000);
   assert.equal(failed.error.data.exitCode, 7);
 
   const slow = request("tools/call", {
     name: "sandbox_run",
-    arguments: { command: `${shellQuote(process.execPath)} -e "setTimeout(() => console.log('slow'), 300)"` },
+    arguments: { command: isPowerShellConfigured() ? "Start-Sleep -Milliseconds 300; Write-Output slow" : `${shellQuote(process.execPath)} -e "setTimeout(() => console.log('slow'), 300)"` },
   });
   const listWhileRunning = await request("tools/list", {});
   assert.equal(listWhileRunning.result.tools.length, 4);
   const slowResult = await slow;
-  assert.equal(slowResult.result.content[0].text, "slow\n");
+  assert.equal(slowResult.result.content[0].text.trim(), "slow");
 
   const read = await request("tools/call", {
     name: "sandbox_read",
