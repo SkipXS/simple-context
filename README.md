@@ -76,13 +76,19 @@ npm test # optional smoke test
   "mcp_servers": {
     "mini-sandbox": {
       "type": "stdio",
-      "command": ["node", "/absolute/path/to/mini-sandbox/server.js"]
+      "command": ["npx", "-y", "github:SkipXS/mini-sandbox"]
     }
   }
 }
 ```
 
 Then `/reload` in Pi.
+
+Pin a version by using a release tag:
+
+```json
+"command": ["npx", "-y", "github:SkipXS/mini-sandbox#v1.0.0"]
+```
 
 ### OpenCode
 
