@@ -77,25 +77,38 @@ npm test # optional smoke test
 
 ### Pi
 
-`.pi/config.json` or your Pi config file:
+`~/.pi/agent/mcp.json`:
 
 ```json
 {
-  "mcp_servers": {
+  "mcpServers": {
     "mini-sandbox": {
-      "type": "stdio",
-      "command": ["npx", "-y", "github:SkipXS/mini-sandbox"]
+      "command": "npx",
+      "args": ["-y", "github:SkipXS/mini-sandbox"],
+      "env": {
+        "MINI_SANDBOX_SHELL": "bash"
+      },
+      "directTools": true,
+      "lifecycle": "lazy"
     }
   }
 }
 ```
 
-Then `/reload` in Pi.
+Then `/reload` in Pi or restart Pi.
+
+`MINI_SANDBOX_SHELL` is optional. On Windows with Git for Windows you can use the full path if `bash` is not on `PATH`:
+
+```json
+"env": {
+  "MINI_SANDBOX_SHELL": "C:/Program Files/Git/bin/bash.exe"
+}
+```
 
 Pin a version by using a release tag:
 
 ```json
-"command": ["npx", "-y", "github:SkipXS/mini-sandbox#v1.0.0"]
+"args": ["-y", "github:SkipXS/mini-sandbox#v1.0.0"]
 ```
 
 ### OpenCode
