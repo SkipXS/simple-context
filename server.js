@@ -329,7 +329,7 @@ async function cmd(args) {
 }
 
 async function readFileTool(args) {
-  const { path: filePath, maxLines = MAX_LINES } = args ?? {};
+  const { path: filePath, maxLines = MAX_LINES, fromLine, toLine } = args ?? {};
   if (typeof filePath !== "string" || filePath.trim() === "") {
     const error = new Error("sandbox_read requires a non-empty path string");
     error.code = -32602;
@@ -344,7 +344,11 @@ async function readFileTool(args) {
     throw error;
   }
 
-  const { text, limited } = await readLimitedFile(resolved, stat.size, MAX_READ_BYTES);
+  const rangeMode = fromLine !== undefined || toLine !== undefined;
+  const range = rangeMode ? normalizeLineRange(fromLine, toLine) : undefined;
+  const { text, limited, rangeLimited, returnedLines, scannedLines } = rangeMode
+    ? await readLineRange(resolved, range.fromLine, range.toLine, maxLines)
+    : await readLimitedFile(resolved, stat.size, MAX_READ_BYTES);
   const formatted = formatOutput(text, maxLines);
 
   return {
@@ -354,15 +358,78 @@ async function readFileTool(args) {
       sizeBytes: stat.size,
       totalLines: formatted.totalLines,
       totalBytes: formatted.totalBytes,
-      truncated: formatted.truncated,
+      truncated: formatted.truncated || rangeLimited,
       fileReadLimited: limited,
+      fromLine: range?.fromLine,
+      toLine: range?.toLine === Infinity ? undefined : range?.toLine,
+      returnedLines,
+      scannedLines,
+      rangeLimited,
     },
+  };
+}
+
+function normalizeLineRange(fromLine, toLine) {
+  const from = fromLine === undefined ? 1 : Number(fromLine);
+  const to = toLine === undefined ? Infinity : Number(toLine);
+
+  if (!Number.isInteger(from) || from < 1) {
+    const error = new Error("sandbox_read fromLine must be an integer >= 1");
+    error.code = -32602;
+    throw error;
+  }
+  if (to !== Infinity && (!Number.isInteger(to) || to < 1)) {
+    const error = new Error("sandbox_read toLine must be an integer >= 1");
+    error.code = -32602;
+    throw error;
+  }
+  if (to < from) {
+    const error = new Error("sandbox_read toLine must be greater than or equal to fromLine");
+    error.code = -32602;
+    throw error;
+  }
+
+  return { fromLine: from, toLine: to };
+}
+
+async function readLineRange(filePath, fromLine, toLine, maxLines) {
+  const limit = normalizeMaxLines(maxLines);
+  const input = fs.createReadStream(filePath, { encoding: "utf8" });
+  const lines = [];
+  const file = createInterface({ input, crlfDelay: Infinity });
+  let lineNumber = 0;
+  let rangeLimited = false;
+
+  try {
+    for await (const line of file) {
+      lineNumber++;
+      if (lineNumber < fromLine) continue;
+      if (lineNumber > toLine) break;
+
+      if (lines.length >= limit) {
+        rangeLimited = true;
+        break;
+      }
+
+      lines.push(line);
+    }
+  } finally {
+    file.close();
+    input.destroy();
+  }
+
+  return {
+    text: lines.join("\n"),
+    limited: false,
+    rangeLimited,
+    returnedLines: lines.length,
+    scannedLines: lineNumber,
   };
 }
 
 async function readLimitedFile(filePath, size, maxBytes) {
   if (size <= maxBytes) {
-    return { text: await fs.promises.readFile(filePath, "utf8"), limited: false };
+    return { text: await fs.promises.readFile(filePath, "utf8"), limited: false, rangeLimited: false };
   }
 
   const headBytes = Math.floor(maxBytes * 0.4);
@@ -382,6 +449,7 @@ async function readLimitedFile(filePath, size, maxBytes) {
         tail.subarray(0, tailRead.bytesRead).toString("utf8"),
       ].join("\n"),
       limited: true,
+      rangeLimited: false,
     };
   } finally {
     await file.close();
@@ -580,6 +648,16 @@ const tools = {
             minimum: 10,
             maximum: 200,
             description: "Max lines before truncation. Default: 60.",
+          },
+          fromLine: {
+            type: "integer",
+            minimum: 1,
+            description: "First 1-based line to read. Optional.",
+          },
+          toLine: {
+            type: "integer",
+            minimum: 1,
+            description: "Last 1-based line to read. Optional.",
           },
         },
         required: ["path"],

@@ -39,7 +39,14 @@ Reads a local UTF-8 text file and returns a safe preview. Output is automaticall
 { "path": "logs/app.log", "maxLines": 100 }
 ```
 
+Read a specific 1-based line range after a search result:
+
+```json
+{ "path": "logs/app.log", "fromLine": 28470, "toLine": 28520, "maxLines": 100 }
+```
+
 File reads are capped at 10 MB by default before formatting. Override with `MINI_SANDBOX_MAX_READ_BYTES` if needed.
+When `fromLine` or `toLine` is used, the file is streamed line-by-line and `maxLines` still caps the returned range.
 
 ### `sandbox_search`
 
@@ -82,7 +89,7 @@ Large output is returned as head + tail:
 ╚══════════════════════════════════════════════════════════╝
 ```
 
-The response always includes `_meta.truncated`. If it is `true`, the LLM can re-run with a higher `maxLines`, pre-filter the command, read a narrower file section via shell tools, or fall back to the native client tool when every line is genuinely needed.
+The response always includes `_meta.truncated`. If it is `true`, the LLM can re-run with a higher `maxLines`, pre-filter the command, read a narrower `sandbox_read` line range, or fall back to the native client tool when every line is genuinely needed.
 
 The server also injects MCP startup instructions telling the LLM when to prefer:
 

@@ -161,6 +161,26 @@ try {
   assert.match(read.result.content[0].text, /file line 0/);
   assert.match(read.result.content[0].text, /file line 299/);
 
+  const rangeRead = await request("tools/call", {
+    name: "sandbox_read",
+    arguments: { path: largeFile, fromLine: 291, toLine: 295, maxLines: 20 },
+  });
+  assert.equal(rangeRead.result._meta.truncated, false);
+  assert.equal(rangeRead.result._meta.fromLine, 291);
+  assert.equal(rangeRead.result._meta.toLine, 295);
+  assert.equal(rangeRead.result._meta.returnedLines, 5);
+  assert.match(rangeRead.result.content[0].text, /file line 290/);
+  assert.match(rangeRead.result.content[0].text, /file line 294/);
+  assert.doesNotMatch(rangeRead.result.content[0].text, /file line 289/);
+
+  const limitedRangeRead = await request("tools/call", {
+    name: "sandbox_read",
+    arguments: { path: largeFile, fromLine: 1, toLine: 50, maxLines: 10 },
+  });
+  assert.equal(limitedRangeRead.result._meta.truncated, true);
+  assert.equal(limitedRangeRead.result._meta.rangeLimited, true);
+  assert.equal(limitedRangeRead.result._meta.returnedLines, 10);
+
   const rgPath = await findRgForTest();
   if (rgPath) {
     const searched = await request("tools/call", {
