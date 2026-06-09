@@ -1,0 +1,29 @@
+{
+  "name": "mini-sandbox",
+  "version": "1.0.0",
+  "description": "Minimal sandbox MCP server — keeps large command output out of LLM context",
+  "type": "module",
+  "main": "server.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SkipXS/mini-sandbox.git"
+  },
+  "homepage": "https://github.com/SkipXS/mini-sandbox#readme",
+  "bugs": {
+    "url": "https://github.com/SkipXS/mini-sandbox/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "server.js",
+    "smoke-test.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node smoke-test.js"
+  },
+  "bin": { "mini-sandbox": "server.js" },
+  "license": "MIT"
+}
