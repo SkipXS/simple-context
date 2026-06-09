@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const child = spawn(process.execPath, ["server.js"], {
   cwd: import.meta.dirname,
-  env: { ...process.env, MINI_SANDBOX_MAX_FETCH_BYTES: "1024" },
+  env: { ...process.env, MINI_SANDBOX_MAX_FETCH_BYTES: "1024", MINI_SANDBOX_MAX_READ_BYTES: "1024" },
   stdio: ["pipe", "pipe", "pipe"],
 });
 
@@ -11,6 +14,7 @@ let nextId = 1;
 let buffer = "";
 const pending = new Map();
 const unexpectedResponses = [];
+let tempDir;
 
 child.stdout.on("data", (chunk) => {
   buffer += chunk.toString();
@@ -68,6 +72,10 @@ function shellQuote(value) {
 }
 
 try {
+  tempDir = await mkdtemp(join(tmpdir(), "mini-sandbox-test-"));
+  const largeFile = join(tempDir, "large.txt");
+  await writeFile(largeFile, Array.from({ length: 300 }, (_, i) => `file line ${i}`).join("\n"), "utf8");
+
   const init = await request("initialize", {});
   assert.equal(init.result.serverInfo.name, "mini-sandbox");
 
@@ -77,7 +85,7 @@ try {
   assert.deepEqual(unexpectedResponses, []);
 
   const listed = await request("tools/list", {});
-  assert.deepEqual(listed.result.tools.map((tool) => tool.name), ["sandbox_run", "sandbox_fetch"]);
+  assert.deepEqual(listed.result.tools.map((tool) => tool.name), ["sandbox_run", "sandbox_read", "sandbox_fetch"]);
 
   const ok = await request("tools/call", {
     name: "sandbox_run",
@@ -85,6 +93,8 @@ try {
   });
   assert.equal(ok.result.content[0].text, "ok\n");
   assert.equal(ok.result._meta.truncated, false);
+  assert.equal(typeof ok.result._meta.durationMs, "number");
+  assert.equal(typeof ok.result._meta.shell, "string");
 
   if ((process.env.MINI_SANDBOX_SHELL ?? "").includes("bash")) {
     const bashOnly = await request("tools/call", {
@@ -114,9 +124,18 @@ try {
     arguments: { command: `${shellQuote(process.execPath)} -e "setTimeout(() => console.log('slow'), 300)"` },
   });
   const listWhileRunning = await request("tools/list", {});
-  assert.equal(listWhileRunning.result.tools.length, 2);
+  assert.equal(listWhileRunning.result.tools.length, 3);
   const slowResult = await slow;
   assert.equal(slowResult.result.content[0].text, "slow\n");
+
+  const read = await request("tools/call", {
+    name: "sandbox_read",
+    arguments: { path: largeFile, maxLines: 20 },
+  });
+  assert.equal(read.result._meta.truncated, true);
+  assert.equal(read.result._meta.fileReadLimited, true);
+  assert.match(read.result.content[0].text, /file line 0/);
+  assert.match(read.result.content[0].text, /file line 299/);
 
   const html = `<html><body>${Array.from({ length: 300 }, (_, i) => `<p>line ${i}</p>`).join("")}</body></html>`;
   const fetched = await request("tools/call", {
@@ -130,5 +149,6 @@ try {
 
   console.log("smoke tests passed");
 } finally {
+  if (typeof tempDir === "string") await rm(tempDir, { recursive: true, force: true });
   child.kill();
 }

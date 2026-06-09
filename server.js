@@ -13,7 +13,13 @@ const MAX_LINES = 60;
 const MAX_BYTES = 32 * 1024;
 const MAX_COMMAND_BYTES = 100 * 1024 * 1024;
 const MAX_FETCH_BYTES = normalizeByteLimit(process.env.MINI_SANDBOX_MAX_FETCH_BYTES, 10 * 1024 * 1024);
+const MAX_READ_BYTES = normalizeByteLimit(process.env.MINI_SANDBOX_MAX_READ_BYTES, 10 * 1024 * 1024);
 const COMMAND_SHELL = process.env.MINI_SANDBOX_SHELL || true;
+const COMMAND_SHELL_NAME = typeof COMMAND_SHELL === "string"
+  ? COMMAND_SHELL
+  : process.platform === "win32"
+    ? process.env.ComSpec || "cmd.exe"
+    : process.env.SHELL || "/bin/sh";
 const CACHE_TTL_MS = 3_600_000;
 
 const CACHE_DIR = path.join(os.homedir(), ".mini-sandbox");
@@ -140,6 +146,7 @@ function errorData(error) {
 
 async function runCommand(command) {
   return await new Promise((resolve, reject) => {
+    const started = Date.now();
     const child = spawn(command, {
       shell: COMMAND_SHELL,
       stdio: ["ignore", "pipe", "pipe"],
@@ -183,9 +190,10 @@ async function runCommand(command) {
       clearTimeout(timer);
       const stdoutText = Buffer.concat(stdout).toString("utf8");
       const stderrText = Buffer.concat(stderr).toString("utf8");
+      const durationMs = Date.now() - started;
 
       if (code === 0 && !timedOut) {
-        resolve(stdoutText);
+        resolve({ stdout: stdoutText, durationMs });
         return;
       }
 
@@ -206,7 +214,7 @@ async function cmd(args) {
     throw error;
   }
 
-  const stdout = await runCommand(command);
+  const { stdout, durationMs } = await runCommand(command);
 
   const formatted = formatOutput(stdout, maxLines);
 
@@ -216,8 +224,70 @@ async function cmd(args) {
       totalLines: formatted.totalLines,
       totalBytes: formatted.totalBytes,
       truncated: formatted.truncated,
+      durationMs,
+      shell: COMMAND_SHELL_NAME,
     },
   };
+}
+
+async function readFileTool(args) {
+  const { path: filePath, maxLines = MAX_LINES } = args ?? {};
+  if (typeof filePath !== "string" || filePath.trim() === "") {
+    const error = new Error("sandbox_read requires a non-empty path string");
+    error.code = -32602;
+    throw error;
+  }
+
+  const resolved = path.resolve(filePath);
+  const stat = await fs.promises.stat(resolved);
+  if (!stat.isFile()) {
+    const error = new Error(`Not a file: ${filePath}`);
+    error.code = -32602;
+    throw error;
+  }
+
+  const { text, limited } = await readLimitedFile(resolved, stat.size, MAX_READ_BYTES);
+  const formatted = formatOutput(text, maxLines);
+
+  return {
+    content: [{ type: "text", text: formatted.text }],
+    _meta: {
+      path: resolved,
+      sizeBytes: stat.size,
+      totalLines: formatted.totalLines,
+      totalBytes: formatted.totalBytes,
+      truncated: formatted.truncated,
+      fileReadLimited: limited,
+    },
+  };
+}
+
+async function readLimitedFile(filePath, size, maxBytes) {
+  if (size <= maxBytes) {
+    return { text: await fs.promises.readFile(filePath, "utf8"), limited: false };
+  }
+
+  const headBytes = Math.floor(maxBytes * 0.4);
+  const tailBytes = maxBytes - headBytes;
+  const file = await fs.promises.open(filePath, "r");
+
+  try {
+    const head = Buffer.alloc(headBytes);
+    const tail = Buffer.alloc(tailBytes);
+    const headRead = await file.read(head, 0, headBytes, 0);
+    const tailRead = await file.read(tail, 0, tailBytes, size - tailBytes);
+
+    return {
+      text: [
+        head.subarray(0, headRead.bytesRead).toString("utf8"),
+        `╟── … file content omitted after ${(maxBytes / 1024).toFixed(1)} KB preview … ──╢`,
+        tail.subarray(0, tailRead.bytesRead).toString("utf8"),
+      ].join("\n"),
+      limited: true,
+    };
+  } finally {
+    await file.close();
+  }
 }
 
 function htmlToText(html) {
@@ -327,6 +397,24 @@ const tools = {
       },
     },
     {
+      name: "sandbox_read",
+      description:
+        "Read a local UTF-8 text file and return truncated head+tail output. Use this instead of cat/type/Get-Content when the full file is not needed.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "File path to read" },
+          maxLines: {
+            type: "integer",
+            minimum: 10,
+            maximum: 200,
+            description: "Max lines before truncation. Default: 60.",
+          },
+        },
+        required: ["path"],
+      },
+    },
+    {
       name: "sandbox_fetch",
       description:
         "Fetch a URL and return its content as plain text (HTML is stripped to readable text). Large output is automatically truncated to head+tail. Results are cached for 1 hour; use force=true to bypass.",
@@ -373,7 +461,7 @@ rl.on("line", async (line) => {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
           serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
-          instructions: `Use sandbox_run instead of bash/terminal for any command whose full output you don't need. Use sandbox_fetch instead of web_fetch/webfetch for any page you don't need raw HTML from. Read the _meta field after each call: if truncated is true, you can re-run with higher maxLines, pre-filter with grep, or fall back to bash.`,
+          instructions: `Use sandbox_run instead of bash/terminal for any command whose full output you don't need. Use sandbox_read instead of cat/type/Get-Content for local files whose full content you don't need. Use sandbox_fetch instead of web_fetch/webfetch for any page you don't need raw HTML from. Read the _meta field after each call: if truncated is true, you can re-run with higher maxLines, pre-filter, or fall back to the native tool.`,
         },
       });
     } else if (method === "notifications/initialized") {
@@ -388,6 +476,13 @@ rl.on("line", async (line) => {
           if (hasId) send({ jsonrpc: "2.0", id, result });
         } catch (e) {
           sendErrorIfRequest(hasId, id, rpcCode(e), e.message, commandErrorData(e));
+        }
+      } else if (name === "sandbox_read") {
+        try {
+          const result = await readFileTool(args);
+          if (hasId) send({ jsonrpc: "2.0", id, result });
+        } catch (e) {
+          sendErrorIfRequest(hasId, id, rpcCode(e), e.message, errorData(e));
         }
       } else if (name === "sandbox_fetch") {
         try {

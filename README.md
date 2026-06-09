@@ -1,6 +1,6 @@
 # mini-sandbox
 
-A minimal MCP server that keeps large output out of your LLM context. Two tools, zero dependencies, works in any MCP-compatible client (Pi, OpenCode, Claude Code, KiloCode, etc.).
+A minimal MCP server that keeps large output out of your LLM context. Three tools, zero dependencies, works in any MCP-compatible client (Pi, OpenCode, Claude Code, KiloCode, etc.).
 
 ## What it does
 
@@ -10,7 +10,8 @@ mini-sandbox gives the LLM two alternatives that **keep raw data out**:
 
 | Instead of | Use | What happens |
 |---|---|---|
-| `bash "tail -10000 log.txt"` | `sandbox_run "tail -10000 log.txt"` | Output capped at 60 lines (head+tail). The LLM sees it was truncated and can re-run with `maxLines: 200` or `grep` pre-filtering. |
+| `bash "tail -10000 log.txt"` | `sandbox_run "tail -10000 log.txt"` | Command output capped at 60 lines (head+tail). The LLM sees it was truncated and can re-run with `maxLines: 200` or pre-filtering. |
+| `cat huge.log` / `type huge.log` | `sandbox_read "huge.log"` | Local file output capped at 60 lines without shell quoting or platform-specific commands. |
 | `webfetch "https://react.dev/..."` | `sandbox_fetch "https://react.dev/..."` | HTML stripped to readable text, then capped at 60 lines when large. Cached for 1 hour. No nav, no footer, no JavaScript. |
 
 The LLM learns when to use which because `instructions` are injected into the system prompt at startup.
@@ -138,7 +139,7 @@ claude mcp add mini-sandbox -- npx -y github:SkipXS/mini-sandbox
 
 ### `sandbox_run`
 
-Run a shell command. Output is auto-truncated when it exceeds 60 lines or 32 KB.
+Run a shell command. Output is auto-truncated when it exceeds 60 lines or 32 KB. `_meta` includes `durationMs` and the shell used for execution.
 
 ```
 sandbox_run { command: "find . -name '*.ts'", maxLines?: 10..200 }
@@ -153,6 +154,17 @@ sandbox_run "cat huge.log" maxLines: 200  # higher limit
 ```
 
 Or fall back to `bash` when every line is genuinely needed.
+
+### `sandbox_read`
+
+Read a local UTF-8 text file. Output is auto-truncated when it exceeds 60 lines or 32 KB.
+File reads are capped at 10 MB by default before formatting. Override with `MINI_SANDBOX_MAX_READ_BYTES` if needed.
+
+```
+sandbox_read { path: "logs/app.log", maxLines?: 10..200 }
+```
+
+Use this instead of `cat`, `type`, or `Get-Content` when you only need a safe preview of a potentially large file.
 
 ### `sandbox_fetch`
 
