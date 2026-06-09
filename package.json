@@ -17,6 +17,7 @@
   },
   "files": [
     "server.js",
+    "src/",
     "smoke-test.js",
     "README.md",
     "LICENSE"
