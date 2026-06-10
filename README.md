@@ -93,7 +93,7 @@ Large output is returned as head + tail:
 
 The response always includes `_meta.truncated`. If it is `true`, the LLM can re-run with a higher `maxLines`, pre-filter the command, read a narrower `context_read` line range, or fall back to the native client tool when every line is genuinely needed.
 
-Each tool response also reports compact savings stats in `_meta`: `returnedBytes`, `savedBytes`, and `estimatedTokensSaved`. Token savings are approximate and use `savedBytes / 4` as a dependency-free estimate.
+Each tool response includes a compact visible savings footer and also reports the same stats in `_meta`: `returnedBytes`, `savedBytes`, `savedPercent`, and `estimatedTokensSaved`. Token savings are approximate and use `savedBytes / 4` as a dependency-free estimate.
 
 The server also injects MCP startup instructions telling the LLM to default to these tools for exploratory commands, file previews, searches, logs, test/build output, and web pages:
 

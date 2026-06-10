@@ -16,7 +16,7 @@ import {
   MAX_READ_BYTES,
   RG_NAME,
 } from "./constants.js";
-import { decodeUtf8, formatOutput } from "./output.js";
+import { addSavingsFooter, decodeUtf8, formatOutput } from "./output.js";
 import { commandError, runCommand, runProcessLines } from "./process.js";
 
 async function loadCache() {
@@ -122,20 +122,22 @@ function savingsMeta(formatted) {
   return {
     returnedBytes: formatted.returnedBytes,
     savedBytes: formatted.savedBytes,
+    savedPercent: formatted.savedPercent,
     estimatedTokensSaved: formatted.estimatedTokensSaved,
   };
 }
 
 function savingsForText(originalText, returnedText) {
   const totalBytes = Buffer.byteLength(originalText, "utf8");
-  const returnedBytes = Buffer.byteLength(returnedText, "utf8");
-  const savedBytes = Math.max(0, totalBytes - returnedBytes);
+  const savings = addSavingsFooter(returnedText, totalBytes);
 
   return {
     totalBytes,
-    returnedBytes,
-    savedBytes,
-    estimatedTokensSaved: Math.ceil(savedBytes / 4),
+    text: savings.text,
+    returnedBytes: savings.returnedBytes,
+    savedBytes: savings.savedBytes,
+    savedPercent: savings.savedPercent,
+    estimatedTokensSaved: savings.estimatedTokensSaved,
   };
 }
 
@@ -374,17 +376,19 @@ async function searchTool(args) {
     maxBytes: MAX_READ_BYTES,
   });
   if (result.code === 1) {
+    const noMatches = addSavingsFooter("(no matches)", 0);
     return {
-      content: [{ type: "text", text: "(no matches)" }],
+      content: [{ type: "text", text: noMatches.text }],
       _meta: {
         rgPath: rg,
         totalMatches: 0,
         totalMatchesKnown: true,
         shownMatches: 0,
         totalBytes: 0,
-        returnedBytes: Buffer.byteLength("(no matches)", "utf8"),
-        savedBytes: 0,
-        estimatedTokensSaved: 0,
+        returnedBytes: noMatches.returnedBytes,
+        savedBytes: noMatches.savedBytes,
+        savedPercent: noMatches.savedPercent,
+        estimatedTokensSaved: noMatches.estimatedTokensSaved,
         truncated: false,
         durationMs: result.durationMs,
       },
@@ -401,11 +405,12 @@ async function searchTool(args) {
   const text = matchLimited
     ? [...shown, `... more matches omitted ...`].join("\n")
     : originalText || "(no matches)";
-  const formatted = formatOutput(text, lineLimit);
+  const formatted = formatOutput(text, lineLimit, { includeSavingsFooter: !matchLimited });
   const searchSavings = matchLimited ? savingsForText(originalText, formatted.text) : savingsMeta(formatted);
+  const { text: responseText = formatted.text, ...searchSavingsMeta } = searchSavings;
 
   return {
-    content: [{ type: "text", text: formatted.text }],
+    content: [{ type: "text", text: responseText }],
     _meta: {
       rgPath: rg,
       totalMatches: matchLimited ? undefined : matches.length,
@@ -413,8 +418,8 @@ async function searchTool(args) {
       matchesRead: matchLimited ? matches.length : undefined,
       shownMatches: shown.length,
       totalLines: formatted.totalLines,
-      totalBytes: searchSavings.totalBytes ?? formatted.totalBytes,
-      ...searchSavings,
+      totalBytes: searchSavingsMeta.totalBytes ?? formatted.totalBytes,
+      ...searchSavingsMeta,
       truncated: matchLimited || formatted.truncated,
       durationMs: result.durationMs,
     },

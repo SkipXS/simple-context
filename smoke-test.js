@@ -94,10 +94,16 @@ function isPowerShellConfigured() {
 function assertSavingsMeta(meta) {
   assert.equal(typeof meta.returnedBytes, "number");
   assert.equal(typeof meta.savedBytes, "number");
+  assert.equal(typeof meta.savedPercent, "number");
   assert.equal(typeof meta.estimatedTokensSaved, "number");
   assert.ok(meta.returnedBytes >= 0);
   assert.ok(meta.savedBytes >= 0);
+  assert.ok(meta.savedPercent >= 0);
   assert.ok(meta.estimatedTokensSaved >= 0);
+}
+
+function assertSavingsFooter(text) {
+  assert.match(text, /\[context saved: .*\([0-9]+%\) \| returned: .* \| est\. tokens saved: [0-9]+\]/);
 }
 
 async function pathExists(filePath) {
@@ -168,7 +174,8 @@ try {
     name: "context_run",
     arguments: { command: isPowerShellConfigured() ? "Write-Output ok" : `${shellQuote(process.execPath)} -e "console.log('ok')"` },
   });
-  assert.equal(ok.result.content[0].text.trim(), "ok");
+  assert.ok(ok.result.content[0].text.startsWith("ok"));
+  assertSavingsFooter(ok.result.content[0].text);
   assert.equal(ok.result._meta.truncated, false);
   assertSavingsMeta(ok.result._meta);
   assert.equal(typeof ok.result._meta.durationMs, "number");
@@ -186,7 +193,7 @@ try {
       name: "context_run",
       arguments: { command: "printf 'configured-bash-ok\\n'" },
     });
-    assert.equal(bashOnly.result.content[0].text.trim(), "configured-bash-ok");
+    assert.ok(bashOnly.result.content[0].text.startsWith("configured-bash-ok"));
   }
 
   if (configuredShell().includes("cmd")) {
@@ -194,7 +201,7 @@ try {
       name: "context_run",
       arguments: { command: "echo configured-cmd-ok" },
     });
-    assert.equal(cmdOnly.result.content[0].text.trim(), "configured-cmd-ok");
+    assert.ok(cmdOnly.result.content[0].text.startsWith("configured-cmd-ok"));
   }
 
   if (isPowerShellConfigured()) {
@@ -202,7 +209,7 @@ try {
       name: "context_run",
       arguments: { command: "Write-Output configured-powershell-ok" },
     });
-    assert.equal(powershellOnly.result.content[0].text.trim(), "configured-powershell-ok");
+    assert.ok(powershellOnly.result.content[0].text.startsWith("configured-powershell-ok"));
   }
 
   const failed = await request("tools/call", {
@@ -219,7 +226,7 @@ try {
   const listWhileRunning = await request("tools/list", {});
   assert.equal(listWhileRunning.result.tools.length, 4);
   const slowResult = await slow;
-  assert.equal(slowResult.result.content[0].text.trim(), "slow");
+  assert.ok(slowResult.result.content[0].text.startsWith("slow"));
 
   const read = await request("tools/call", {
     name: "context_read",
@@ -228,6 +235,7 @@ try {
   assert.equal(read.result._meta.truncated, true);
   assertSavingsMeta(read.result._meta);
   assert.ok(read.result._meta.savedBytes > 0);
+  assertSavingsFooter(read.result.content[0].text);
   assert.equal(read.result._meta.fileReadLimited, true);
   assert.match(read.result.content[0].text, /file line 0/);
   assert.match(read.result.content[0].text, /file line 299/);
@@ -301,6 +309,7 @@ try {
     assert.equal(searched.result._meta.shownMatches, 5);
     assert.equal(searched.result._meta.truncated, true);
     assertSavingsMeta(searched.result._meta);
+    assertSavingsFooter(searched.result.content[0].text);
     assert.equal(searched.result._meta.totalMatchesKnown, false);
     assert.equal(searched.result._meta.totalMatches, undefined);
     assert.equal(searched.result._meta.matchesRead, 6);
@@ -329,6 +338,7 @@ try {
   assert.equal(fetched.result._meta.truncated, true);
   assertSavingsMeta(fetched.result._meta);
   assert.ok(fetched.result._meta.savedBytes > 0);
+  assertSavingsFooter(fetched.result.content[0].text);
   assert.equal(fetched.result._meta.downloadLimited, true);
   assert.match(fetched.result.content[0].text, /lines omitted/);
 
