@@ -19,11 +19,11 @@ export function formatOutput(output, maxLines = MAX_LINES) {
   const totalLines = lines.length;
 
   if (totalLines <= limit && totalBytes <= MAX_BYTES) {
-    return { text: output || "(no output)", totalLines, totalBytes, truncated: false };
+    return withSavings(output || "(no output)", totalLines, totalBytes, false);
   }
 
   if (totalLines <= limit) {
-    return { text: formatByteSummary(output, totalBytes), totalLines, totalBytes, truncated: true };
+    return withSavings(formatByteSummary(output, totalBytes), totalLines, totalBytes, true);
   }
 
   const head = Math.floor(limit * 0.4);
@@ -37,11 +37,22 @@ export function formatOutput(output, maxLines = MAX_LINES) {
     `╚${"═".repeat(58)}╝`,
   ].join("\n");
 
+  const text = Buffer.byteLength(summary, "utf8") <= MAX_BYTES ? summary : formatByteSummary(output, totalBytes);
+  return withSavings(text, totalLines, totalBytes, true);
+}
+
+function withSavings(text, totalLines, totalBytes, truncated) {
+  const returnedBytes = Buffer.byteLength(text, "utf8");
+  const savedBytes = Math.max(0, totalBytes - returnedBytes);
+
   return {
-    text: Buffer.byteLength(summary, "utf8") <= MAX_BYTES ? summary : formatByteSummary(output, totalBytes),
+    text,
     totalLines,
     totalBytes,
-    truncated: true,
+    returnedBytes,
+    savedBytes,
+    estimatedTokensSaved: Math.ceil(savedBytes / 4),
+    truncated,
   };
 }
 

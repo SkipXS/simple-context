@@ -91,6 +91,15 @@ function isPowerShellConfigured() {
   return shell.includes("powershell") || shell.includes("pwsh");
 }
 
+function assertSavingsMeta(meta) {
+  assert.equal(typeof meta.returnedBytes, "number");
+  assert.equal(typeof meta.savedBytes, "number");
+  assert.equal(typeof meta.estimatedTokensSaved, "number");
+  assert.ok(meta.returnedBytes >= 0);
+  assert.ok(meta.savedBytes >= 0);
+  assert.ok(meta.estimatedTokensSaved >= 0);
+}
+
 async function pathExists(filePath) {
   try {
     await import("node:fs/promises").then((fs) => fs.stat(filePath));
@@ -161,6 +170,7 @@ try {
   });
   assert.equal(ok.result.content[0].text.trim(), "ok");
   assert.equal(ok.result._meta.truncated, false);
+  assertSavingsMeta(ok.result._meta);
   assert.equal(typeof ok.result._meta.durationMs, "number");
   assert.equal(typeof ok.result._meta.shell, "string");
 
@@ -216,6 +226,8 @@ try {
     arguments: { path: largeFile, maxLines: 20 },
   });
   assert.equal(read.result._meta.truncated, true);
+  assertSavingsMeta(read.result._meta);
+  assert.ok(read.result._meta.savedBytes > 0);
   assert.equal(read.result._meta.fileReadLimited, true);
   assert.match(read.result.content[0].text, /file line 0/);
   assert.match(read.result.content[0].text, /file line 299/);
@@ -288,6 +300,7 @@ try {
     assert.equal(typeof searched.result._meta.rgPath, "string");
     assert.equal(searched.result._meta.shownMatches, 5);
     assert.equal(searched.result._meta.truncated, true);
+    assertSavingsMeta(searched.result._meta);
     assert.equal(searched.result._meta.totalMatchesKnown, false);
     assert.equal(searched.result._meta.totalMatches, undefined);
     assert.equal(searched.result._meta.matchesRead, 6);
@@ -314,6 +327,8 @@ try {
   });
   assert.ok(fetched.result, JSON.stringify(fetched));
   assert.equal(fetched.result._meta.truncated, true);
+  assertSavingsMeta(fetched.result._meta);
+  assert.ok(fetched.result._meta.savedBytes > 0);
   assert.equal(fetched.result._meta.downloadLimited, true);
   assert.match(fetched.result.content[0].text, /lines omitted/);
 
@@ -352,6 +367,7 @@ try {
     arguments: { url: cacheUrl, force: true },
   });
   assert.equal(uncachedFetch.result._meta.cached, false);
+  assertSavingsMeta(uncachedFetch.result._meta);
   const cachedFetch = await request("tools/call", {
     name: "sandbox_fetch",
     arguments: { url: cacheUrl },

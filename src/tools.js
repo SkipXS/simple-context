@@ -118,6 +118,27 @@ function validateInteger(value, name, min, max) {
   return value;
 }
 
+function savingsMeta(formatted) {
+  return {
+    returnedBytes: formatted.returnedBytes,
+    savedBytes: formatted.savedBytes,
+    estimatedTokensSaved: formatted.estimatedTokensSaved,
+  };
+}
+
+function savingsForText(originalText, returnedText) {
+  const totalBytes = Buffer.byteLength(originalText, "utf8");
+  const returnedBytes = Buffer.byteLength(returnedText, "utf8");
+  const savedBytes = Math.max(0, totalBytes - returnedBytes);
+
+  return {
+    totalBytes,
+    returnedBytes,
+    savedBytes,
+    estimatedTokensSaved: Math.ceil(savedBytes / 4),
+  };
+}
+
 async function runTool(args) {
   const { command, maxLines = MAX_LINES } = args ?? {};
   if (typeof command !== "string" || command.trim() === "") {
@@ -133,6 +154,7 @@ async function runTool(args) {
     _meta: {
       totalLines: formatted.totalLines,
       totalBytes: formatted.totalBytes,
+      ...savingsMeta(formatted),
       truncated: formatted.truncated,
       durationMs,
       shell: COMMAND_SHELL_NAME,
@@ -169,6 +191,7 @@ async function readTool(args) {
       sizeBytes: stat.size,
       totalLines: formatted.totalLines,
       totalBytes: formatted.totalBytes,
+      ...savingsMeta(formatted),
       truncated: formatted.truncated || rangeLimited || limited,
       fileReadLimited: limited,
       fromLine: range?.fromLine,
@@ -358,6 +381,10 @@ async function searchTool(args) {
         totalMatches: 0,
         totalMatchesKnown: true,
         shownMatches: 0,
+        totalBytes: 0,
+        returnedBytes: Buffer.byteLength("(no matches)", "utf8"),
+        savedBytes: 0,
+        estimatedTokensSaved: 0,
         truncated: false,
         durationMs: result.durationMs,
       },
@@ -370,10 +397,12 @@ async function searchTool(args) {
   const matches = result.lines;
   const shown = matches.slice(0, limit);
   const matchLimited = result.truncated || result.outputTooLarge || matches.length > limit;
+  const originalText = matches.join("\n");
   const text = matchLimited
     ? [...shown, `... more matches omitted ...`].join("\n")
-    : matches.join("\n") || "(no matches)";
+    : originalText || "(no matches)";
   const formatted = formatOutput(text, lineLimit);
+  const searchSavings = matchLimited ? savingsForText(originalText, formatted.text) : savingsMeta(formatted);
 
   return {
     content: [{ type: "text", text: formatted.text }],
@@ -384,7 +413,8 @@ async function searchTool(args) {
       matchesRead: matchLimited ? matches.length : undefined,
       shownMatches: shown.length,
       totalLines: formatted.totalLines,
-      totalBytes: formatted.totalBytes,
+      totalBytes: searchSavings.totalBytes ?? formatted.totalBytes,
+      ...searchSavings,
       truncated: matchLimited || formatted.truncated,
       durationMs: result.durationMs,
     },
@@ -519,6 +549,7 @@ async function fetchTool(args) {
     _meta: {
       totalLines: formatted.totalLines,
       totalBytes: formatted.totalBytes,
+      ...savingsMeta(formatted),
       truncated: formatted.truncated || data.limited,
       cached: data.cached,
       downloadLimited: data.limited,

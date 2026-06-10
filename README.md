@@ -75,6 +75,7 @@ Fetches an `http` or `https` URL, strips HTML to readable text, caches the resul
 
 Downloads are capped at 10 MB by default before parsing/caching. Override with `MINI_SANDBOX_MAX_FETCH_BYTES` if needed.
 Non-HTTP schemes are blocked by default. Set `MINI_SANDBOX_ALLOW_NON_HTTP_FETCH=1` if you explicitly need schemes such as `data:` for local testing.
+HTTP(S) fetches are not restricted to public internet hosts. `sandbox_fetch` can access `localhost`, private network addresses, and other HTTP services reachable from the machine running the MCP server. Only enable mini-sandbox for agents you trust with that local access.
 
 ## How It Works
 
@@ -91,6 +92,8 @@ Large output is returned as head + tail:
 ```
 
 The response always includes `_meta.truncated`. If it is `true`, the LLM can re-run with a higher `maxLines`, pre-filter the command, read a narrower `sandbox_read` line range, or fall back to the native client tool when every line is genuinely needed.
+
+Each tool response also reports compact savings stats in `_meta`: `returnedBytes`, `savedBytes`, and `estimatedTokensSaved`. Token savings are approximate and use `savedBytes / 4` as a dependency-free estimate.
 
 The server also injects MCP startup instructions telling the LLM to default to these tools for exploratory commands, file previews, searches, logs, test/build output, and web pages:
 
