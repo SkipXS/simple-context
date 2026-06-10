@@ -69,7 +69,7 @@ export function commandError(command, code, signal, stdout, stderr, timedOut = f
 
 export function errorData(error) {
   const data = {};
-  for (const key of ["code", "errno", "address", "port"]) {
+  for (const key of ["code", "errno", "address", "port", "httpStatus", "httpStatusText", "url"]) {
     if (typeof error[key] === "string" || typeof error[key] === "number") data[key] = error[key];
   }
   if (error.cause) {

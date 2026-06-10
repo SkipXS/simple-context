@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { MAX_BYTES } from "./src/constants.js";
 import { formatOutput } from "./src/output.js";
+import { errorData, runProcess, runProcessLines } from "./src/process.js";
+import { callTool } from "./src/tools.js";
 
 const child = spawn(process.execPath, ["server.js"], {
   cwd: import.meta.dirname,
@@ -22,6 +25,7 @@ let buffer = "";
 const pending = new Map();
 const unexpectedResponses = [];
 let tempDir;
+let httpServer;
 
 child.stdout.on("data", (chunk) => {
   buffer += chunk.toString();
@@ -116,10 +120,24 @@ try {
   assert.equal(longLine.truncated, true);
   assert.ok(Buffer.byteLength(longLine.text, "utf8") <= MAX_BYTES);
   assert.doesNotMatch(longLine.text, /-\d+ lines omitted/);
+  const unicodeLongLine = formatOutput("🙂".repeat(MAX_BYTES), 60);
+  assert.equal(unicodeLongLine.truncated, true);
+  assert.doesNotMatch(unicodeLongLine.text, /�/);
+
+  const timedOutProcess = await runProcess(process.execPath, ["-e", "setTimeout(() => {}, 1000)"], { timeout: 50 });
+  assert.equal(timedOutProcess.timedOut, true);
+
+  const lineLimitedProcess = await runProcessLines(process.execPath, ["-e", "for (let i = 0; i < 50; i++) console.log(i)"], { maxLines: 10 });
+  assert.equal(lineLimitedProcess.truncated, true);
+  assert.equal(lineLimitedProcess.lines.length, 10);
 
   tempDir = await mkdtemp(join(tmpdir(), "mini-sandbox-test-"));
   const largeFile = join(tempDir, "large.txt");
+  const largeOneLineFile = join(tempDir, "large-one-line.txt");
+  const dashFile = join(tempDir, "dash.txt");
   await writeFile(largeFile, Array.from({ length: 300 }, (_, i) => `file line ${i}`).join("\n"), "utf8");
+  await writeFile(largeOneLineFile, "🙂".repeat(2048), "utf8");
+  await writeFile(dashFile, "-needle\nplain\n", "utf8");
 
   const init = await request("initialize", {});
   assert.equal(init.result.serverInfo.name, "mini-sandbox");
@@ -190,6 +208,14 @@ try {
   assert.match(read.result.content[0].text, /file line 0/);
   assert.match(read.result.content[0].text, /file line 299/);
 
+  const limitedRead = await request("tools/call", {
+    name: "sandbox_read",
+    arguments: { path: largeOneLineFile, maxLines: 20 },
+  });
+  assert.equal(limitedRead.result._meta.fileReadLimited, true);
+  assert.equal(limitedRead.result._meta.truncated, true);
+  assert.doesNotMatch(limitedRead.result.content[0].text, /�/);
+
   const rangeRead = await request("tools/call", {
     name: "sandbox_read",
     arguments: { path: largeFile, fromLine: 291, toLine: 295, maxLines: 20 },
@@ -210,6 +236,13 @@ try {
   assert.equal(limitedRangeRead.result._meta.rangeLimited, true);
   assert.equal(limitedRangeRead.result._meta.returnedLines, 10);
 
+  const invalidRangeRead = await request("tools/call", {
+    name: "sandbox_read",
+    arguments: { path: largeFile, fromLine: 5, toLine: 1 },
+  });
+  assert.equal(invalidRangeRead.error.code, -32602);
+  assert.match(invalidRangeRead.error.message, /toLine must be greater/);
+
   const rgPath = await findRgForTest();
   if (rgPath) {
     const searched = await request("tools/call", {
@@ -222,6 +255,15 @@ try {
     assert.equal(searched.result._meta.shownMatches, 5);
     assert.equal(searched.result._meta.truncated, true);
     assert.equal(searched.result._meta.totalMatchesKnown, false);
+    assert.equal(searched.result._meta.totalMatches, undefined);
+    assert.equal(searched.result._meta.matchesRead, 6);
+
+    const dashPattern = await request("tools/call", {
+      name: "sandbox_search",
+      arguments: { pattern: "-needle", path: dashFile, maxMatches: 5 },
+    });
+    assert.ok(dashPattern.result, JSON.stringify(dashPattern));
+    assert.match(dashPattern.result.content[0].text, /-needle/);
   }
 
   const html = `<html><body>${Array.from({ length: 300 }, (_, i) => `<p>line ${i}</p>`).join("")}</body></html>`;
@@ -234,8 +276,53 @@ try {
   assert.equal(fetched.result._meta.downloadLimited, true);
   assert.match(fetched.result.content[0].text, /lines omitted/);
 
+  const invalidForce = await request("tools/call", {
+    name: "sandbox_fetch",
+    arguments: { url: "data:text/plain,ok", force: "false" },
+  });
+  assert.equal(invalidForce.error.code, -32602);
+  assert.match(invalidForce.error.message, /force must be a boolean/);
+
+  const limitedFetch = await request("tools/call", {
+    name: "sandbox_fetch",
+    arguments: { url: `data:text/plain,${encodeURIComponent("🙂".repeat(2048))}`, force: true, maxLines: 20 },
+  });
+  assert.equal(limitedFetch.result._meta.downloadLimited, true);
+  assert.equal(limitedFetch.result._meta.truncated, true);
+  assert.doesNotMatch(limitedFetch.result.content[0].text, /�/);
+
+  const cacheUrl = `data:text/plain,${encodeURIComponent(`cache-${Date.now()}`)}`;
+  const uncachedFetch = await request("tools/call", {
+    name: "sandbox_fetch",
+    arguments: { url: cacheUrl, force: true },
+  });
+  assert.equal(uncachedFetch.result._meta.cached, false);
+  const cachedFetch = await request("tools/call", {
+    name: "sandbox_fetch",
+    arguments: { url: cacheUrl },
+  });
+  assert.equal(cachedFetch.result._meta.cached, true);
+
+  httpServer = createServer((req, res) => {
+    res.writeHead(418, { "content-type": "text/plain" });
+    res.end("teapot");
+  });
+  await new Promise((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+  const { port } = httpServer.address();
+  try {
+    await callTool("sandbox_fetch", { url: `http://127.0.0.1:${port}/missing`, force: true });
+    assert.fail("expected sandbox_fetch to reject HTTP errors");
+  } catch (error) {
+    const data = errorData(error);
+    assert.equal(error.code, -32000);
+    assert.equal(data.httpStatus, 418);
+    assert.equal(data.httpStatusText, "I'm a Teapot");
+    assert.match(data.url, /127\.0\.0\.1/);
+  }
+
   console.log("smoke tests passed");
 } finally {
+  if (httpServer) await new Promise((resolve) => httpServer.close(resolve));
   if (typeof tempDir === "string") await rm(tempDir, { recursive: true, force: true });
   child.kill();
 }

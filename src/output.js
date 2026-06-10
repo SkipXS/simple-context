@@ -45,6 +45,27 @@ export function formatOutput(output, maxLines = MAX_LINES) {
   };
 }
 
+export function decodeUtf8(buffer, { trimStart = false, trimEnd = false } = {}) {
+  let start = 0;
+  let end = buffer.length;
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(start, end));
+    } catch {
+      if (trimEnd && end > start) {
+        end--;
+      } else if (trimStart && start < end) {
+        start++;
+      } else {
+        break;
+      }
+    }
+  }
+
+  return buffer.subarray(start, end).toString("utf8");
+}
+
 function formatByteSummary(output, totalBytes) {
   const buffer = Buffer.from(output, "utf8");
   const headBytes = Math.floor(MAX_BYTES * 0.4);
@@ -54,9 +75,9 @@ function formatByteSummary(output, totalBytes) {
 
   return [
     `╔══ ${(totalBytes / 1024).toFixed(1)} KB · showing first ${(headBytes / 1024).toFixed(1)} KB + last ${(tailBytes / 1024).toFixed(1)} KB ══╗`,
-    buffer.subarray(0, headBytes).toString("utf8"),
+    decodeUtf8(buffer.subarray(0, headBytes), { trimEnd: true }),
     `╟── … ${(omittedBytes / 1024).toFixed(1)} KB omitted … ──╢`,
-    buffer.subarray(tailStart).toString("utf8"),
+    decodeUtf8(buffer.subarray(tailStart), { trimStart: true }),
     `╚${"═".repeat(58)}╝`,
   ].join("\n");
 }

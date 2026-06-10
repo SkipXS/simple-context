@@ -15,20 +15,23 @@ import {
   MAX_READ_BYTES,
   RG_NAME,
 } from "./constants.js";
-import { formatOutput, normalizeLimit, normalizeMaxLines } from "./output.js";
+import { decodeUtf8, formatOutput, normalizeLimit, normalizeMaxLines } from "./output.js";
 import { commandError, runCommand, runProcessLines } from "./process.js";
 
-fs.mkdirSync(CACHE_DIR, { recursive: true });
-
-function loadCache() {
-  try { return pruneCache(JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"))); } catch {
+async function loadCache() {
+  try { return pruneCache(JSON.parse(await fs.promises.readFile(CACHE_FILE, "utf8"))); } catch {
     return {};
   }
 }
 
-function saveCache(nextCache) {
+async function saveCache(nextCache) {
   cache = pruneCache(nextCache);
-  fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2));
+  try {
+    await fs.promises.mkdir(CACHE_DIR, { recursive: true });
+    await fs.promises.writeFile(CACHE_FILE, JSON.stringify(cache, null, 2));
+  } catch {
+    // Cache failures should not make sandbox_fetch unusable.
+  }
 }
 
 function pruneCache(cache) {
@@ -41,7 +44,12 @@ function pruneCache(cache) {
   );
 }
 
-let cache = loadCache();
+let cache;
+
+async function getCache() {
+  if (cache === undefined) cache = await loadCache();
+  return cache;
+}
 
 function pathEntries() {
   const raw = process.env.PATH ?? process.env.Path ?? "";
@@ -129,7 +137,7 @@ async function readTool(args) {
       sizeBytes: stat.size,
       totalLines: formatted.totalLines,
       totalBytes: formatted.totalBytes,
-      truncated: formatted.truncated || rangeLimited,
+      truncated: formatted.truncated || rangeLimited || limited,
       fileReadLimited: limited,
       fromLine: range?.fromLine,
       toLine: range?.toLine === Infinity ? undefined : range?.toLine,
@@ -215,9 +223,9 @@ async function readLimitedFile(filePath, size, maxBytes) {
 
     return {
       text: [
-        head.subarray(0, headRead.bytesRead).toString("utf8"),
+        decodeUtf8(head.subarray(0, headRead.bytesRead), { trimEnd: true }),
         `╟── … file content omitted after ${(maxBytes / 1024).toFixed(1)} KB preview … ──╢`,
-        tail.subarray(0, tailRead.bytesRead).toString("utf8"),
+        decodeUtf8(tail.subarray(0, tailRead.bytesRead), { trimStart: true }),
       ].join("\n"),
       limited: true,
       rangeLimited: false,
@@ -264,7 +272,7 @@ async function searchTool(args) {
   const limit = normalizeLimit(maxMatches, 100, 1, 1000);
   const rgArgs = ["--line-number", "--with-filename", "--color", "never", "--no-heading"];
   if (include) rgArgs.push("--glob", include);
-  rgArgs.push(pattern, searchPath);
+  rgArgs.push("--", pattern, searchPath);
 
   const result = await runProcessLines(rg, rgArgs, {
     cwd: process.cwd(),
@@ -301,8 +309,9 @@ async function searchTool(args) {
     content: [{ type: "text", text: formatted.text }],
     _meta: {
       rgPath: rg,
-      totalMatches: matches.length,
+      totalMatches: matchLimited ? undefined : matches.length,
       totalMatchesKnown: !matchLimited,
+      matchesRead: matchLimited ? matches.length : undefined,
       shownMatches: shown.length,
       totalLines: formatted.totalLines,
       totalBytes: formatted.totalBytes,
@@ -348,7 +357,8 @@ async function fetchUrl(url, force) {
   }
 
   const key = createHash("sha256").update(url).digest("hex");
-  const cached = cache[key];
+  const currentCache = await getCache();
+  const cached = currentCache[key];
   if (!force && cached && Date.now() - cached.ts < CACHE_TTL_MS) {
     return { content: cached.content, cached: true, limited: cached.limited ?? false };
   }
@@ -358,14 +368,21 @@ async function fetchUrl(url, force) {
     signal: AbortSignal.timeout(30_000),
   });
 
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    const error = new Error(`HTTP ${res.status} ${res.statusText}`);
+    error.code = -32000;
+    error.httpStatus = res.status;
+    error.httpStatusText = res.statusText;
+    error.url = url;
+    throw error;
+  }
 
   const contentType = res.headers.get("content-type") ?? "";
   const { text: raw, limited } = await readLimitedText(res, MAX_FETCH_BYTES);
   const text = contentType.includes("html") ? htmlToText(raw) : raw;
 
-  cache[key] = { ts: Date.now(), content: text, limited };
-  saveCache(cache);
+  currentCache[key] = { ts: Date.now(), content: text, limited };
+  await saveCache(currentCache);
   return { content: text, cached: false, limited };
 }
 
@@ -397,11 +414,17 @@ async function readLimitedText(res, maxBytes) {
     reader.releaseLock();
   }
 
-  return { text: Buffer.concat(chunks).toString("utf8"), limited };
+  return { text: decodeUtf8(Buffer.concat(chunks), { trimEnd: limited }), limited };
 }
 
 async function fetchTool(args) {
   const { url, force = false, maxLines = MAX_LINES } = args ?? {};
+  if (force !== undefined && typeof force !== "boolean") {
+    const error = new Error("sandbox_fetch force must be a boolean when provided");
+    error.code = -32602;
+    throw error;
+  }
+
   const data = await fetchUrl(url, force);
   const formatted = formatOutput(data.content, maxLines);
 
@@ -410,7 +433,7 @@ async function fetchTool(args) {
     _meta: {
       totalLines: formatted.totalLines,
       totalBytes: formatted.totalBytes,
-      truncated: formatted.truncated,
+      truncated: formatted.truncated || data.limited,
       cached: data.cached,
       downloadLimited: data.limited,
     },
