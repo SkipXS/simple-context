@@ -13,6 +13,8 @@ import { searchTool } from "./search.js";
 import { statsTool } from "./stats.js";
 import { testSummaryTool } from "./test-summary.js";
 import { treeTool } from "./tree.js";
+import { usageReportTool } from "./usage-report.js";
+import { recordUsage } from "../usage.js";
 
 export const tools = {
   tools: [
@@ -315,6 +317,19 @@ export const tools = {
         properties: {},
       },
     },
+    {
+      name: "context_usage_report",
+      description:
+        "Summarize local usage telemetry and suggest potential new context tools. Usage is logged locally by default; set SIMPLE_CONTEXT_LIMITER_USAGE_LOG=0 to opt out.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          maxEvents: { type: "integer", minimum: 1, maximum: 10000, description: "Maximum recent usage events to analyze. Default: 1000." },
+          maxLines: { type: "integer", minimum: 10, maximum: 200, description: "Max lines before truncation. Default: 60." },
+          maxBytes: { type: "integer", minimum: 1024, maximum: MAX_BYTES, description: "Max output bytes before truncation. Default: 32768." },
+        },
+      },
+    },
   ],
 };
 
@@ -333,13 +348,28 @@ const handlers = {
   context_fetch: fetchTool,
   context_diff: diffTool,
   context_stats: statsTool,
+  context_usage_report: usageReportTool,
 };
 
 export async function callTool(name, args) {
-  const handler = handlers[name];
-  if (handler) return await handler(args);
+  const started = Date.now();
+  let result;
+  let error;
 
-  const error = new Error(`Unknown tool: ${name}`);
-  error.code = -32601;
-  throw error;
+  try {
+    const handler = handlers[name];
+    if (handler) {
+      result = await handler(args);
+      return result;
+    }
+
+    error = new Error(`Unknown tool: ${name}`);
+    error.code = -32601;
+    throw error;
+  } catch (caught) {
+    error = caught;
+    throw caught;
+  } finally {
+    await recordUsage(name, args, result, error, Date.now() - started);
+  }
 }

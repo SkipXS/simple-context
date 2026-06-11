@@ -1,6 +1,6 @@
 # simple-context-limiter
 
-A minimal MCP server that keeps large command, log, file, search, repo-discovery, web, and git diff output out of your LLM context. Fourteen tools, zero dependencies, works in MCP-compatible clients such as Pi, OpenCode, Claude Code, and KiloCode.
+A minimal MCP server that keeps large command, log, file, search, repo-discovery, web, and git diff output out of your LLM context. Fifteen tools, zero dependencies, works in MCP-compatible clients such as Pi, OpenCode, Claude Code, and KiloCode.
 
 ## Tools
 
@@ -20,6 +20,7 @@ A minimal MCP server that keeps large command, log, file, search, repo-discovery
 | `context_fetch` | Fetching web pages as readable text | `webfetch`, raw HTML downloads |
 | `context_diff` | Reviewing compact Git diffs | raw `git diff` output |
 | `context_stats` | Viewing current-project aggregate savings stats | manual accounting |
+| `context_usage_report` | Finding candidates for future tools from local usage metadata | guessing from project trees alone |
 
 ### `context_run`
 
@@ -100,6 +101,18 @@ Use these before broad file reads or recursive shell commands:
 - `context_grep_context` searches with bounded context windows around matches.
 
 Use `context_test_summary` for test/check commands when you want error blocks or a compact tail fallback instead of full output.
+
+### Usage Reports
+
+simple-context-limiter records local usage metadata by default in `~/.simple-context-limiter/usage.jsonl`. It does not store tool outputs and does not upload anything. For shell commands, it stores a command class such as `git-history`, `dependencies`, or `infra-logs`, not the raw command string.
+
+Use `context_usage_report` to see which existing tools save the most context and which new tools may be worth adding:
+
+```json
+{ "maxEvents": 1000, "maxLines": 100 }
+```
+
+Opt out by setting `SIMPLE_CONTEXT_LIMITER_USAGE_LOG=0` or `SIMPLE_CONTEXT_LIMITER_DISABLE_USAGE_LOG=1` in the MCP server environment.
 
 ### `context_fetch`
 
@@ -292,6 +305,8 @@ For Pi:
 | `SIMPLE_CONTEXT_LIMITER_CACHE_MAX_ENTRIES` | `200` | Max cached fetch entries kept on disk |
 | `SIMPLE_CONTEXT_LIMITER_CACHE_MAX_BYTES` | `52428800` | Max cached fetch content bytes kept on disk |
 | `SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH` | unset | Set to `1` to allow non-HTTP fetch schemes |
+| `SIMPLE_CONTEXT_LIMITER_USAGE_LOG` | enabled | Set to `0` to disable local usage logging |
+| `SIMPLE_CONTEXT_LIMITER_DISABLE_USAGE_LOG` | unset | Set to `1` to disable local usage logging |
 
 ## Security / Trust Model
 
@@ -300,6 +315,8 @@ simple-context-limiter intentionally gives trusted agents local capabilities: `c
 ## Cache
 
 `context_fetch` caches fetched content for 1 hour in `~/.simple-context-limiter/cache.json` and prunes old entries on load/save. The cache is capped by entry count and total content bytes. Delete that file anytime to clear the cache.
+
+`context_usage_report` reads `~/.simple-context-limiter/usage.jsonl`. Delete that file anytime to clear collected usage metadata.
 
 ## Why So Minimal?
 

@@ -26,7 +26,13 @@ export const COMMAND_SHELL_NAME = typeof COMMAND_SHELL === "string"
 export const CACHE_DIR = path.join(os.homedir(), ".simple-context-limiter");
 export const CACHE_FILE = path.join(CACHE_DIR, "cache.json");
 export const STATS_FILE = path.join(CACHE_DIR, "stats.json");
+export const USAGE_LOG_FILE = path.join(CACHE_DIR, "usage.jsonl");
 export const RG_NAME = process.platform === "win32" ? "rg.exe" : "rg";
+
+export function usageLogEnabled() {
+  return !/^(0|false|no|off)$/i.test(process.env.SIMPLE_CONTEXT_LIMITER_USAGE_LOG ?? "")
+    && !/^(1|true|yes|on)$/i.test(process.env.SIMPLE_CONTEXT_LIMITER_DISABLE_USAGE_LOG ?? "");
+}
 
 export function normalizeByteLimit(value, fallback) {
   const numeric = Number(value);

@@ -49,6 +49,7 @@ const instructions = "Default to context_run, context_logs, context_read, contex
   + "Use context_changed_files before git diff when you only need changed file names/status. "
   + "Use context_fetch instead of web_fetch/webfetch for pages you do not need as raw HTML. "
   + "Use context_diff instead of raw git diff when reviewing working tree or staged changes. "
+  + "Use context_usage_report when deciding which additional context tools would be valuable from local usage patterns. "
   + "Use native shell/read/fetch/diff tools only when you specifically need complete output, exact stderr/exit behavior, interactivity, or unsupported behavior. "
   + "Read the _meta field after each call: if truncated is true, retry with a narrower query/range or higher maxLines/maxBytes before falling back to native tools.";
 

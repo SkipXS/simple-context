@@ -10,6 +10,8 @@ import { formatOutput } from "./src/output.js";
 import { errorData, runProcess, runProcessLines } from "./src/process.js";
 import { callTool } from "./src/tools.js";
 
+process.env.SIMPLE_CONTEXT_LIMITER_USAGE_LOG = "0";
+
 const child = spawn(process.execPath, ["server.js"], {
   cwd: import.meta.dirname,
   env: {
@@ -17,6 +19,7 @@ const child = spawn(process.execPath, ["server.js"], {
     SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH: "1",
     SIMPLE_CONTEXT_LIMITER_MAX_FETCH_BYTES: "1024",
     SIMPLE_CONTEXT_LIMITER_MAX_READ_BYTES: "2048",
+    SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "0",
   },
   stdio: ["pipe", "pipe", "pipe"],
 });
@@ -195,6 +198,7 @@ try {
     "context_fetch",
     "context_diff",
     "context_stats",
+    "context_usage_report",
   ]);
 
   const files = await request("tools/call", {
@@ -757,6 +761,56 @@ try {
   assert.ok(parsedStats.byTool.context_run.returnedBytes <= parsedStats.byTool.context_run.totalBytes);
   assert.ok(parsedStats.savedBytes > 0);
   assert.ok(parsedStats.estimatedTokensSaved > 0);
+
+  const usageRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
+    import { readFile } from 'node:fs/promises';
+    import { join } from 'node:path';
+    const { callTool } = await import('./src/tools.js');
+    for (let i = 0; i < 3; i++) {
+      try { await callTool('context_run', { command: 'git log --oneline -1', maxLines: 20 }); } catch {}
+    }
+    await callTool('context_run', { command: ${JSON.stringify(isPowerShellConfigured() ? `& ${shellQuote(process.execPath)} -e "console.log('x'.repeat(50000))"` : `${shellQuote(process.execPath)} -e "console.log('x'.repeat(50000))"`)}, maxLines: 20 });
+    const report = await callTool('context_usage_report', { maxEvents: 20 });
+    const usageLog = await readFile(join(process.env.HOME, '.simple-context-limiter', 'usage.jsonl'), 'utf8');
+    console.log(JSON.stringify({ text: report.content[0].text, meta: report._meta, usageLog }));
+  `], {
+    cwd: import.meta.dirname,
+    timeout: 10_000,
+    env: {
+      ...process.env,
+      HOME: join(tempDir, "usage-home"),
+      USERPROFILE: join(tempDir, "usage-home"),
+      SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "1",
+    },
+  });
+  assert.equal(usageRun.code, 0, usageRun.stderr);
+  const usagePayload = JSON.parse(usageRun.stdout.trim());
+  assert.match(usagePayload.text, /Usage summary/);
+  assert.match(usagePayload.text, /context_run:/);
+  assert.match(usagePayload.text, /git-history:/);
+  assert.match(usagePayload.text, /context_git_history:/);
+  assert.equal(usagePayload.meta.loggingEnabled, true);
+  assert.equal(usagePayload.meta.byCommandKind.some((entry) => entry.name === "git-history"), true);
+  assert.equal(usagePayload.usageLog.includes("git log --oneline"), false);
+
+  const usageOptOutRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
+    import { readFile } from 'node:fs/promises';
+    import { join } from 'node:path';
+    const { callTool } = await import('./src/tools.js');
+    await callTool('context_run', { command: ${JSON.stringify(isPowerShellConfigured() ? `& ${shellQuote(process.execPath)} -e "console.log('ok')"` : `${shellQuote(process.execPath)} -e "console.log('ok')"`)} });
+    try { await readFile(join(process.env.HOME, '.simple-context-limiter', 'usage.jsonl'), 'utf8'); console.log('exists'); } catch { console.log('missing'); }
+  `], {
+    cwd: import.meta.dirname,
+    timeout: 5_000,
+    env: {
+      ...process.env,
+      HOME: join(tempDir, "usage-disabled-home"),
+      USERPROFILE: join(tempDir, "usage-disabled-home"),
+      SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "0",
+    },
+  });
+  assert.equal(usageOptOutRun.code, 0, usageOptOutRun.stderr);
+  assert.equal(usageOptOutRun.stdout.trim(), "missing");
 
   httpServer = createServer((req, res) => {
     if (req.url === "/large") {
