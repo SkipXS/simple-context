@@ -21,10 +21,6 @@ async function getLoadedCache() {
   return await cacheLoad;
 }
 
-export async function saveCache(nextCache) {
-  await updateCache(() => nextCache);
-}
-
 export async function updateCache(mutator) {
   let result;
   cacheWrite = cacheWrite.catch(() => {}).then(async () => {

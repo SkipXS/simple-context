@@ -192,7 +192,7 @@ export async function runCommandResult(command) {
 
 export async function runCommand(command) {
   const result = await runCommandResult(command);
-  if (result.code === 0 && !result.timedOut) return { stdout: result.stdout, durationMs: result.durationMs };
+  if (result.code === 0 && !result.signal && !result.timedOut) return { stdout: result.stdout, durationMs: result.durationMs };
 
   commandError(command, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge);
 }

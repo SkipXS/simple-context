@@ -66,6 +66,7 @@ When `fromLine` or `toLine` is used, the file is streamed line-by-line and `maxL
 ### `context_search`
 
 Searches local files with ripgrep and returns bounded `file:line:match` output. Override with `maxMatches`, `maxLines`, or `maxBytes` per call.
+Relative search paths are resolved from the MCP server's `process.cwd()`.
 
 ```json
 { "pattern": "ERROR", "path": "logs", "include": "*.log", "maxMatches": 100, "maxBytes": 16384 }
@@ -107,6 +108,7 @@ Review staged changes instead:
 ```
 
 `context_diff` only reports tracked working-tree or staged changes covered by `git diff`. It does not include untracked files unless they have been staged.
+Relative diff paths are resolved from the MCP server's `process.cwd()`.
 
 ### `context_stats`
 

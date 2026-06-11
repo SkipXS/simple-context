@@ -5,8 +5,19 @@ import { SERVER_NAME, SERVER_VERSION } from "./src/constants.js";
 import { tools, callTool } from "./src/tools.js";
 import { commandErrorData, errorData } from "./src/process.js";
 
+function handleStdoutError(error) {
+  if (error?.code === "EPIPE" || error?.code === "ERR_STREAM_DESTROYED") process.exit(0);
+  throw error;
+}
+
+process.stdout.on("error", handleStdoutError);
+
 function send(message) {
-  process.stdout.write(JSON.stringify(message) + "\n");
+  try {
+    process.stdout.write(JSON.stringify(message) + "\n");
+  } catch (error) {
+    handleStdoutError(error);
+  }
 }
 
 function sendError(id, code, message, data) {
