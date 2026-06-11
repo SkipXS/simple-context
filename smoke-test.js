@@ -493,6 +493,27 @@ try {
   });
   assert.equal(cachedFetch.result._meta.cached, true);
 
+  const cacheRace = await runProcess(process.execPath, ["--input-type=module", "-e", `
+    import { readFile } from 'node:fs/promises';
+    import { join } from 'node:path';
+    const { callTool } = await import('./src/tools.js');
+    const urls = Array.from({ length: 20 }, (_, i) => 'data:text/plain,' + encodeURIComponent('cache-race-' + i));
+    await Promise.all(urls.map((url) => callTool('context_fetch', { url, force: true })));
+    const cache = JSON.parse(await readFile(join(process.env.HOME, '.simple-context-limiter', 'cache.json'), 'utf8'));
+    console.log(Object.keys(cache).length);
+  `], {
+    cwd: import.meta.dirname,
+    timeout: 5_000,
+    env: {
+      ...process.env,
+      HOME: join(tempDir, "cache-race-home"),
+      USERPROFILE: join(tempDir, "cache-race-home"),
+      SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH: "1",
+    },
+  });
+  assert.equal(cacheRace.code, 0, cacheRace.stderr);
+  assert.equal(Number(cacheRace.stdout.trim()), 20);
+
   const cachePrune = await runProcess(process.execPath, ["--input-type=module", "-e", `
     const one = 'data:text/plain,' + encodeURIComponent('a'.repeat(700));
     const two = 'data:text/plain,' + encodeURIComponent('b'.repeat(700));

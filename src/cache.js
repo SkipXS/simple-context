@@ -3,6 +3,7 @@ import { CACHE_FILE, CACHE_MAX_BYTES, CACHE_MAX_ENTRIES, CACHE_TTL_MS } from "./
 import { writeJsonAtomically } from "./storage.js";
 
 let cache;
+let cacheLoad;
 let cacheWrite = Promise.resolve();
 
 async function loadCache() {
@@ -11,10 +12,27 @@ async function loadCache() {
   }
 }
 
+async function getLoadedCache() {
+  if (cache !== undefined) return cache;
+  cacheLoad ??= loadCache().then((loaded) => {
+    cache = loaded;
+    return cache;
+  });
+  return await cacheLoad;
+}
+
 export async function saveCache(nextCache) {
-  cache = pruneCache(nextCache);
-  const snapshot = cache;
+  await updateCache(() => nextCache);
+}
+
+export async function updateCache(mutator) {
+  let result;
   cacheWrite = cacheWrite.catch(() => {}).then(async () => {
+    const currentCache = await getLoadedCache();
+    result = await mutator(currentCache);
+    cache = pruneCache(result ?? currentCache);
+    const snapshot = cache;
+
     try {
       await writeJsonAtomically(CACHE_FILE, snapshot);
     } catch {
@@ -22,6 +40,7 @@ export async function saveCache(nextCache) {
     }
   });
   await cacheWrite;
+  return result;
 }
 
 function pruneCache(cache) {
@@ -48,6 +67,5 @@ function pruneCache(cache) {
 }
 
 export async function getCache() {
-  if (cache === undefined) cache = await loadCache();
-  return cache;
+  return await getLoadedCache();
 }

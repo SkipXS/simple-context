@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { ALLOW_NON_HTTP_FETCH, CACHE_TTL_MS, MAX_BYTES, MAX_FETCH_BYTES, MAX_LINES, SERVER_VERSION } from "../constants.js";
-import { getCache, saveCache } from "../cache.js";
+import { getCache, updateCache } from "../cache.js";
 import { decodeUtf8, formatOutput } from "../output.js";
 import { recordStats } from "../stats.js";
 import { invalidParams, savingsMeta, validateInteger } from "./shared.js";
@@ -20,12 +20,26 @@ function htmlToText(html) {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, "\"")
     .replace(/&#39;/g, "'")
+    .replace(/&(apos|mdash|ndash|hellip|copy|reg);/gi, decodeNamedHtmlEntity)
     .replace(/&#(x[0-9a-f]+|\d+);/gi, decodeNumericHtmlEntity)
     .replace(/&nbsp;/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/ +/g, " ")
     .replace(/^[ \t]+/gm, "")
     .trim();
+}
+
+function decodeNamedHtmlEntity(match, name) {
+  const entities = {
+    apos: "'",
+    mdash: "\u2014",
+    ndash: "\u2013",
+    hellip: "\u2026",
+    copy: "\u00a9",
+    reg: "\u00ae",
+  };
+
+  return entities[name.toLowerCase()] ?? match;
 }
 
 function decodeNumericHtmlEntity(match, value) {
@@ -82,8 +96,9 @@ async function fetchUrl(url, force) {
   const { text: raw, limited } = await readLimitedText(res, MAX_FETCH_BYTES);
   const text = contentType.includes("html") ? htmlToText(raw) : raw;
 
-  currentCache[key] = { ts: Date.now(), content: text, limited };
-  await saveCache(currentCache);
+  await updateCache((cache) => {
+    cache[key] = { ts: Date.now(), content: text, limited };
+  });
   return { content: text, cached: false, limited };
 }
 
