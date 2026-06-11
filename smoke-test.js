@@ -176,11 +176,19 @@ try {
   const packageJson = JSON.parse(await readFile(join(import.meta.dirname, "package.json"), "utf8"));
   assert.equal(SERVER_VERSION, packageJson.version);
   assert.equal(init.result.serverInfo.version, packageJson.version);
+  assert.equal(packageJson.bin["simple-context-limiter"], "server.js");
+  assert.ok(packageJson.files.includes("server.js"));
+  assert.ok(packageJson.files.includes("src/"));
+  assert.match(await readFile(join(import.meta.dirname, "server.js"), "utf8"), /^#!\/usr\/bin\/env node/);
 
   notification("notifications/initialized", {});
   notification("unknown/notification", {});
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.deepEqual(unexpectedResponses, []);
+
+  const unknownMethod = await request("unknown/method", {});
+  assert.equal(unknownMethod.error.code, -32601);
+  assert.match(unknownMethod.error.message, /Unknown method/);
 
   const listed = await request("tools/list", {});
   assert.deepEqual(listed.result.tools.map((tool) => tool.name), [
@@ -200,6 +208,13 @@ try {
     "context_stats",
     "context_usage_report",
   ]);
+
+  const unknownTool = await request("tools/call", {
+    name: "context_missing",
+    arguments: {},
+  });
+  assert.equal(unknownTool.error.code, -32601);
+  assert.match(unknownTool.error.message, /Unknown tool/);
 
   const files = await request("tools/call", {
     name: "context_files",
@@ -274,6 +289,17 @@ try {
   assertSavingsMeta(ok.result._meta);
   assert.equal(typeof ok.result._meta.durationMs, "number");
   assert.equal(typeof ok.result._meta.shell, "string");
+
+  const stdoutWithStderr = await request("tools/call", {
+    name: "context_run",
+    arguments: {
+      command: isPowerShellConfigured()
+        ? `& ${shellQuote(process.execPath)} -e "console.log('stdout-ok'); console.error('stderr-noise')"`
+        : `${shellQuote(process.execPath)} -e "console.log('stdout-ok'); console.error('stderr-noise')"`,
+    },
+  });
+  assert.match(stdoutWithStderr.result.content[0].text, /stdout-ok/);
+  assert.doesNotMatch(stdoutWithStderr.result.content[0].text, /stderr-noise/);
 
   const byteLimitedRun = await request("tools/call", {
     name: "context_run",
@@ -550,6 +576,34 @@ try {
   assert.equal(invalidSearchMaxBytes.error.code, -32602);
   assert.match(invalidSearchMaxBytes.error.message, /maxBytes must be between 1024/);
 
+  const missingRgRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
+    const { callTool } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "src", "tools.js")).href)});
+    let payload;
+    try {
+      await callTool('context_search', { pattern: 'needle', path: '.' });
+      payload = { ok: true };
+    } catch (error) {
+      payload = { ok: false, code: error.code, message: error.message };
+    }
+    console.log(JSON.stringify(payload));
+  `], {
+    cwd: tempDir,
+    timeout: 5_000,
+    env: {
+      ...process.env,
+      PATH: "",
+      Path: "",
+      HOME: join(tempDir, "missing-rg-home"),
+      USERPROFILE: join(tempDir, "missing-rg-home"),
+      SIMPLE_CONTEXT_LIMITER_RG_PATH: "",
+    },
+  });
+  assert.equal(missingRgRun.code, 0, missingRgRun.stderr);
+  const missingRgPayload = JSON.parse(missingRgRun.stdout.trim());
+  assert.equal(missingRgPayload.ok, false);
+  assert.equal(missingRgPayload.code, -32000);
+  assert.match(missingRgPayload.message, /ripgrep was not found/);
+
   const html = `<html><body>${Array.from({ length: 300 }, (_, i) => `<p>line ${i}</p>`).join("")}</body></html>`;
   const fetched = await request("tools/call", {
     name: "context_fetch",
@@ -596,6 +650,39 @@ try {
   });
   assert.equal(invalidFetchMaxBytes.error.code, -32602);
   assert.match(invalidFetchMaxBytes.error.message, /maxBytes must be an integer/);
+
+  const invalidFetchUrl = await request("tools/call", {
+    name: "context_fetch",
+    arguments: { url: "not a url" },
+  });
+  assert.equal(invalidFetchUrl.error.code, -32602);
+  assert.match(invalidFetchUrl.error.message, /valid URL/);
+
+  const blockedProtocolRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
+    const { callTool } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "src", "tools.js")).href)});
+    let payload;
+    try {
+      await callTool('context_fetch', { url: 'data:text/plain,ok' });
+      payload = { ok: true };
+    } catch (error) {
+      payload = { ok: false, code: error.code, message: error.message };
+    }
+    console.log(JSON.stringify(payload));
+  `], {
+    cwd: import.meta.dirname,
+    timeout: 5_000,
+    env: {
+      ...process.env,
+      SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH: "",
+      HOME: join(tempDir, "blocked-protocol-home"),
+      USERPROFILE: join(tempDir, "blocked-protocol-home"),
+    },
+  });
+  assert.equal(blockedProtocolRun.code, 0, blockedProtocolRun.stderr);
+  const blockedProtocolPayload = JSON.parse(blockedProtocolRun.stdout.trim());
+  assert.equal(blockedProtocolPayload.ok, false);
+  assert.equal(blockedProtocolPayload.code, -32602);
+  assert.match(blockedProtocolPayload.message, /only allows http and https/);
 
   const limitedFetch = await request("tools/call", {
     name: "context_fetch",

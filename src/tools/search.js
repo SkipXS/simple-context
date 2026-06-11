@@ -15,7 +15,10 @@ function pathEntries() {
 async function isExecutable(filePath) {
   try {
     const stat = await fs.promises.stat(filePath);
-    return stat.isFile();
+    if (!stat.isFile()) return false;
+    if (process.platform === "win32") return true;
+    await fs.promises.access(filePath, fs.constants.X_OK);
+    return true;
   } catch {
     return false;
   }

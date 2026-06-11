@@ -25,6 +25,7 @@ A minimal MCP server that keeps large command, log, file, search, repo-discovery
 ### `context_run`
 
 Runs a shell command and returns stdout. Output is automatically truncated when it exceeds 60 lines or 32 KB. Override with `maxLines` or `maxBytes` per call.
+Commands that exit successfully but write diagnostics to stderr will not include stderr in `context_run`; use `context_logs` when stderr or mixed command output matters.
 
 ```json
 { "command": "find . -name '*.ts'", "maxLines": 100, "maxBytes": 16384 }
