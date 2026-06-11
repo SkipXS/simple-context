@@ -1,6 +1,6 @@
 # simple-context-limiter
 
-A minimal MCP server that keeps large command, log, file, search, web, and git diff output out of your LLM context. Seven tools, zero dependencies, works in MCP-compatible clients such as Pi, OpenCode, Claude Code, and KiloCode.
+A minimal MCP server that keeps large command, log, file, search, repo-discovery, web, and git diff output out of your LLM context. Fourteen tools, zero dependencies, works in MCP-compatible clients such as Pi, OpenCode, Claude Code, and KiloCode.
 
 ## Tools
 
@@ -10,6 +10,13 @@ A minimal MCP server that keeps large command, log, file, search, web, and git d
 | `context_logs` | Extracting relevant errors from tests, builds, lints, and logs | raw test/build output, full server logs |
 | `context_read` | Reading local UTF-8 text files safely | `cat huge.log`, `type huge.log`, `Get-Content huge.log` |
 | `context_search` | Searching local files with bounded ripgrep output | raw `rg` / `grep` commands |
+| `context_files` | Listing tracked project files compactly | broad recursive globs, `find .` |
+| `context_tree` | Viewing a bounded directory tree | full recursive tree output |
+| `context_repo_summary` | Getting package/README/config overview | several separate file reads |
+| `context_file_outline` | Seeing imports/exports/functions/classes | reading large source files fully |
+| `context_test_summary` | Running tests/checks with extracted failures | raw test/build output |
+| `context_changed_files` | Seeing compact changed-file status | separate `git status` / name-only calls |
+| `context_grep_context` | Searching with small surrounding context | search followed by multiple reads |
 | `context_fetch` | Fetching web pages as readable text | `webfetch`, raw HTML downloads |
 | `context_diff` | Reviewing compact Git diffs | raw `git diff` output |
 | `context_stats` | Viewing current-project aggregate savings stats | manual accounting |
@@ -81,6 +88,19 @@ simple-context-limiter does not download ripgrep. It uses the first available bi
 
 If none is found, `context_search` returns a clear error. The other tools do not need ripgrep.
 
+### Repo Discovery Tools
+
+Use these before broad file reads or recursive shell commands:
+
+- `context_files` lists tracked files with optional regex filtering.
+- `context_tree` shows a bounded tree and skips heavy folders like `.git` and `node_modules`.
+- `context_repo_summary` summarizes package metadata, scripts, configs, README preview, and tracked-file count.
+- `context_file_outline` extracts imports, exports, functions, classes, and top-level declarations from one source file.
+- `context_changed_files` shows compact Git porcelain status.
+- `context_grep_context` searches with bounded context windows around matches.
+
+Use `context_test_summary` for test/check commands when you want error blocks or a compact tail fallback instead of full output.
+
 ### `context_fetch`
 
 Fetches an `http` or `https` URL, strips HTML to readable text, caches the result for 1 hour, and truncates large output. Override with `maxLines` or `maxBytes` per call.
@@ -146,6 +166,10 @@ The server also injects MCP startup instructions telling the LLM to default to t
 - `context_logs` instead of plain command output for tests, builds, lints, server logs, and other error-heavy output
 - `context_read` instead of `cat`, `type`, or `Get-Content` for file previews
 - `context_search` instead of raw `rg` or `grep` commands for bounded search results
+- `context_files`, `context_tree`, `context_repo_summary`, and `context_file_outline` before broad file reads
+- `context_test_summary` instead of raw test/check output
+- `context_changed_files` instead of separate Git status/name-only commands
+- `context_grep_context` instead of search plus several file reads
 - `context_fetch` instead of raw web fetches for pages that are not needed as raw HTML
 - `context_diff` instead of raw `git diff` for compact working-tree or staged diff previews
 - `context_stats` when you want to inspect accumulated current-project savings

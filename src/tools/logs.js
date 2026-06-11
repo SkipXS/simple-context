@@ -5,6 +5,10 @@ import { recordStats } from "../stats.js";
 import { invalidParams, savingsForText, validateInteger } from "./shared.js";
 
 export async function logsTool(args) {
+  return await logsResult(args, "context_logs");
+}
+
+export async function logsResult(args, toolName) {
   const {
     command,
     maxBlocks = 10,
@@ -45,7 +49,7 @@ export async function logsTool(args) {
     blocksShown: extraction.blocksShown,
     fallback: extraction.fallback,
   };
-  await recordStats("context_logs", meta);
+  await recordStats(toolName, meta);
 
   return {
     content: [{ type: "text", text: formatted.text }],

@@ -21,7 +21,7 @@ async function isExecutable(filePath) {
   }
 }
 
-async function findRg() {
+export async function findRg() {
   const candidates = [];
 
   if (process.env.SIMPLE_CONTEXT_LIMITER_RG_PATH) candidates.push(process.env.SIMPLE_CONTEXT_LIMITER_RG_PATH);

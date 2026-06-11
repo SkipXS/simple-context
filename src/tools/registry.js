@@ -1,11 +1,18 @@
 import { MAX_BYTES } from "../constants.js";
+import { changedFilesTool } from "./changed-files.js";
 import { diffTool } from "./diff.js";
 import { fetchTool } from "./fetch.js";
+import { filesTool } from "./files.js";
+import { grepContextTool } from "./grep-context.js";
 import { logsTool } from "./logs.js";
+import { outlineTool } from "./outline.js";
 import { readTool } from "./read.js";
+import { repoSummaryTool } from "./repo-summary.js";
 import { runTool } from "./run.js";
 import { searchTool } from "./search.js";
 import { statsTool } from "./stats.js";
+import { testSummaryTool } from "./test-summary.js";
+import { treeTool } from "./tree.js";
 
 export const tools = {
   tools: [
@@ -136,6 +143,108 @@ export const tools = {
       },
     },
     {
+      name: "context_files",
+      description:
+        "List tracked project files compactly using git ls-files when available, with bounded output and optional regex filtering. Use this instead of broad recursive file globs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "File or directory path to list. Default: ." },
+          include: { type: "string", description: "Optional JavaScript regular expression used to filter returned file paths." },
+          maxFiles: { type: "integer", minimum: 1, maximum: 5000, description: "Maximum files to show. Default: 500." },
+          maxLines: { type: "integer", minimum: 10, maximum: 200, description: "Max output lines before truncation. Default: 60." },
+          maxBytes: { type: "integer", minimum: 1024, maximum: MAX_BYTES, description: "Max output bytes before truncation. Default: 32768." },
+        },
+      },
+    },
+    {
+      name: "context_tree",
+      description:
+        "Show a bounded directory tree while skipping common heavy directories such as .git and node_modules.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Directory path to inspect. Default: ." },
+          maxDepth: { type: "integer", minimum: 1, maximum: 10, description: "Maximum directory depth. Default: 3." },
+          maxEntries: { type: "integer", minimum: 1, maximum: 2000, description: "Maximum entries to show. Default: 200." },
+          maxLines: { type: "integer", minimum: 10, maximum: 200, description: "Max output lines before truncation. Default: 60." },
+          maxBytes: { type: "integer", minimum: 1024, maximum: MAX_BYTES, description: "Max output bytes before truncation. Default: 32768." },
+        },
+      },
+    },
+    {
+      name: "context_repo_summary",
+      description:
+        "Summarize the current repository from package metadata, README preview, scripts, configs, and tracked-file count.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          maxLines: { type: "integer", minimum: 10, maximum: 200, description: "Max output lines before truncation. Default: 60." },
+          maxBytes: { type: "integer", minimum: 1024, maximum: MAX_BYTES, description: "Max output bytes before truncation. Default: 32768." },
+        },
+      },
+    },
+    {
+      name: "context_file_outline",
+      description:
+        "Return imports, exports, functions, classes, and top-level declarations from a source file without reading the whole file into context.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Source file path to outline." },
+          maxSymbols: { type: "integer", minimum: 1, maximum: 1000, description: "Maximum outline entries to show. Default: 200." },
+          maxLines: { type: "integer", minimum: 10, maximum: 200, description: "Max output lines before truncation. Default: 60." },
+          maxBytes: { type: "integer", minimum: 1024, maximum: MAX_BYTES, description: "Max output bytes before truncation. Default: 32768." },
+        },
+        required: ["path"],
+      },
+    },
+    {
+      name: "context_test_summary",
+      description:
+        "Run a test/check command and return extracted error or tail output with compact metadata. Defaults to npm test.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          command: { type: "string", description: "Test/check command to execute. Default: npm test." },
+          maxBlocks: { type: "integer", minimum: 1, maximum: 50, description: "Maximum error/log blocks to show. Default: 10." },
+          contextLines: { type: "integer", minimum: 0, maximum: 20, description: "Lines of context around matches. Default: 5." },
+          maxLines: { type: "integer", minimum: 10, maximum: 200, description: "Max output lines before truncation. Default: 120." },
+          maxBytes: { type: "integer", minimum: 1024, maximum: MAX_BYTES, description: "Max output bytes before truncation. Default: 32768." },
+        },
+      },
+    },
+    {
+      name: "context_changed_files",
+      description:
+        "Show a compact git status porcelain list of changed files. Use this instead of separate status/name-only calls.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          maxLines: { type: "integer", minimum: 10, maximum: 200, description: "Max output lines before truncation. Default: 60." },
+          maxBytes: { type: "integer", minimum: 1024, maximum: MAX_BYTES, description: "Max output bytes before truncation. Default: 32768." },
+        },
+      },
+    },
+    {
+      name: "context_grep_context",
+      description:
+        "Search with ripgrep and return bounded context windows around matches. Use this instead of search followed by multiple file reads.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          pattern: { type: "string", description: "Regex pattern to search for." },
+          path: { type: "string", description: "File or directory to search. Default: ." },
+          include: { type: "string", description: "File glob to include, for example *.js or *.{ts,tsx}." },
+          contextLines: { type: "integer", minimum: 0, maximum: 10, description: "Lines before and after each match. Default: 2." },
+          maxMatches: { type: "integer", minimum: 1, maximum: 500, description: "Approximate match windows to collect. Default: 50." },
+          maxLines: { type: "integer", minimum: 10, maximum: 200, description: "Max output lines before truncation. Default: 60." },
+          maxBytes: { type: "integer", minimum: 1024, maximum: MAX_BYTES, description: "Max output bytes before truncation. Default: 32768." },
+        },
+        required: ["pattern"],
+      },
+    },
+    {
       name: "context_fetch",
       description:
         "Fetch a URL and return its content as plain text (HTML is stripped to readable text). Large output is automatically truncated to head+tail. Results are cached for 1 hour; use force=true to bypass.",
@@ -214,6 +323,13 @@ const handlers = {
   context_logs: logsTool,
   context_read: readTool,
   context_search: searchTool,
+  context_files: filesTool,
+  context_tree: treeTool,
+  context_repo_summary: repoSummaryTool,
+  context_file_outline: outlineTool,
+  context_test_summary: testSummaryTool,
+  context_changed_files: changedFilesTool,
+  context_grep_context: grepContextTool,
   context_fetch: fetchTool,
   context_diff: diffTool,
   context_stats: statsTool,

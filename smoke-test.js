@@ -177,7 +177,64 @@ try {
   assert.deepEqual(unexpectedResponses, []);
 
   const listed = await request("tools/list", {});
-  assert.deepEqual(listed.result.tools.map((tool) => tool.name), ["context_run", "context_logs", "context_read", "context_search", "context_fetch", "context_diff", "context_stats"]);
+  assert.deepEqual(listed.result.tools.map((tool) => tool.name), [
+    "context_run",
+    "context_logs",
+    "context_read",
+    "context_search",
+    "context_files",
+    "context_tree",
+    "context_repo_summary",
+    "context_file_outline",
+    "context_test_summary",
+    "context_changed_files",
+    "context_grep_context",
+    "context_fetch",
+    "context_diff",
+    "context_stats",
+  ]);
+
+  const files = await request("tools/call", {
+    name: "context_files",
+    arguments: { include: "^(server|package)\\.json$|^server\\.js$", maxFiles: 20 },
+  });
+  assert.ok(files.result, JSON.stringify(files));
+  assert.match(files.result.content[0].text, /server\.js/);
+  assert.equal(typeof files.result._meta.totalFiles, "number");
+
+  const tree = await request("tools/call", {
+    name: "context_tree",
+    arguments: { path: tempDir, maxDepth: 2, maxEntries: 20 },
+  });
+  assert.ok(tree.result, JSON.stringify(tree));
+  assert.match(tree.result.content[0].text, /large\.txt/);
+
+  const repoSummary = await request("tools/call", {
+    name: "context_repo_summary",
+    arguments: { maxLines: 40 },
+  });
+  assert.ok(repoSummary.result, JSON.stringify(repoSummary));
+  assert.match(repoSummary.result.content[0].text, /simple-context-limiter/);
+
+  const outline = await request("tools/call", {
+    name: "context_file_outline",
+    arguments: { path: join(import.meta.dirname, "src", "tools", "run.js"), maxSymbols: 20 },
+  });
+  assert.ok(outline.result, JSON.stringify(outline));
+  assert.match(outline.result.content[0].text, /runTool/);
+
+  const testSummary = await request("tools/call", {
+    name: "context_test_summary",
+    arguments: {
+      command: isPowerShellConfigured()
+        ? `& ${shellQuote(process.execPath)} -e "console.error('ReferenceError: missing'); process.exit(2)"`
+        : `${shellQuote(process.execPath)} -e "console.error('ReferenceError: missing'); process.exit(2)"`,
+      maxBytes: 4096,
+    },
+  });
+  assert.ok(testSummary.result, JSON.stringify(testSummary));
+  assert.equal(testSummary.result._meta.exitCode, 2);
+  assert.match(testSummary.result.content[0].text, /ReferenceError: missing/);
 
   const invalidDiffMaxFiles = await request("tools/call", {
     name: "context_diff",
@@ -314,7 +371,7 @@ try {
     arguments: { command: isPowerShellConfigured() ? "Start-Sleep -Milliseconds 300; Write-Output slow" : `${shellQuote(process.execPath)} -e "setTimeout(() => console.log('slow'), 300)"` },
   });
   const listWhileRunning = await request("tools/list", {});
-  assert.equal(listWhileRunning.result.tools.length, 7);
+  assert.equal(listWhileRunning.result.tools.length, listed.result.tools.length);
   const slowResult = await slow;
   assert.ok(slowResult.result.content[0].text.startsWith("slow"));
 
@@ -424,6 +481,14 @@ try {
     });
     assert.ok(dashPattern.result, JSON.stringify(dashPattern));
     assert.match(dashPattern.result.content[0].text, /-needle/);
+
+    const grepContext = await request("tools/call", {
+      name: "context_grep_context",
+      arguments: { pattern: "file line 29", path: largeFile, contextLines: 1, maxMatches: 3 },
+    });
+    assert.ok(grepContext.result, JSON.stringify(grepContext));
+    assert.match(grepContext.result.content[0].text, /file line 29/);
+    assert.equal(typeof grepContext.result._meta.rgPath, "string");
 
     const byteLimitedSearch = await request("tools/call", {
       name: "context_search",
@@ -583,8 +648,9 @@ try {
       const { callTool } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "src", "tools.js")).href)});
       const diff = await callTool('context_diff', { maxFiles: 1, maxHunks: 1, maxBytes: 4096 });
       const blankPathDiff = await callTool('context_diff', { path: '', maxBytes: 4096 });
+      const changedFiles = await callTool('context_changed_files', { maxBytes: 4096 });
       const noStagedDiff = await callTool('context_diff', { staged: true, maxBytes: 4096 });
-      console.log(JSON.stringify({ diff: { text: diff.content[0].text, meta: diff._meta }, blankPathDiff: { text: blankPathDiff.content[0].text, meta: blankPathDiff._meta }, noStagedDiff: { text: noStagedDiff.content[0].text, meta: noStagedDiff._meta } }));
+      console.log(JSON.stringify({ diff: { text: diff.content[0].text, meta: diff._meta }, blankPathDiff: { text: blankPathDiff.content[0].text, meta: blankPathDiff._meta }, changedFiles: { text: changedFiles.content[0].text, meta: changedFiles._meta }, noStagedDiff: { text: noStagedDiff.content[0].text, meta: noStagedDiff._meta } }));
     `], {
       cwd: gitDir,
       timeout: 5_000,
@@ -610,6 +676,9 @@ try {
     assertSavingsMeta(diffPayload.diff.meta);
     assert.match(diffPayload.blankPathDiff.text, /Diff stat:/);
     assert.equal(diffPayload.blankPathDiff.meta.filesChanged, 2);
+    assert.match(diffPayload.changedFiles.text, /a\.txt/);
+    assert.match(diffPayload.changedFiles.text, /b\.txt/);
+    assert.equal(diffPayload.changedFiles.meta.changedFiles, 2);
     assert.equal(diffPayload.noStagedDiff.text, "(no diff)");
     assert.equal(diffPayload.noStagedDiff.meta.staged, true);
     assert.equal(diffPayload.noStagedDiff.meta.truncated, false);
