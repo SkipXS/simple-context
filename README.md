@@ -99,10 +99,10 @@ simple-context-limiter does not download ripgrep. It uses the first available bi
 
 If none is found, `search` returns a clear error. The other tools do not need ripgrep.
 
-Structural search is available when the ast-grep CLI is installed. It is optional and not bundled:
+Structural search is available when the ast-grep CLI is installed. It is optional and not bundled. `language` can be omitted when it can be inferred from `path` or `include`:
 
 ```json
-{ "engine": "ast", "pattern": "assert.equal($A, $B)", "language": "javascript", "path": "smoke-test.js", "maxMatches": 20 }
+{ "engine": "ast", "pattern": "assert.equal($A, $B)", "path": "smoke-test.js", "maxMatches": 20 }
 ```
 
 Install ast-grep with one of:

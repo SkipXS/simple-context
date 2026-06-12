@@ -9,6 +9,32 @@ import { invalidParams, savingsForText, savingsMeta, validateInteger } from "./s
 
 const MATCH_SEPARATOR = "\x1f";
 const CONTEXT_SEPARATOR = "\x1e";
+const AST_LANGUAGE_BY_EXTENSION = new Map([
+  [".c", "c"],
+  [".cc", "cpp"],
+  [".cpp", "cpp"],
+  [".cs", "csharp"],
+  [".css", "css"],
+  [".go", "go"],
+  [".html", "html"],
+  [".java", "java"],
+  [".js", "javascript"],
+  [".jsx", "javascript"],
+  [".json", "json"],
+  [".kt", "kotlin"],
+  [".kts", "kotlin"],
+  [".php", "php"],
+  [".py", "python"],
+  [".rb", "ruby"],
+  [".rs", "rust"],
+  [".ts", "typescript"],
+  [".tsx", "tsx"],
+  [".yml", "yaml"],
+  [".yaml", "yaml"],
+]);
+
+let astGrepCacheKey;
+let astGrepCachePromise;
 
 function pathEntries() {
   const raw = process.env.PATH ?? process.env.Path ?? "";
@@ -47,12 +73,21 @@ export async function findRg() {
 }
 
 async function canRunAstGrep(candidate) {
-  const result = await runProcessLines(candidate, ["--version"], { timeout: 5_000, maxLines: 2, maxBytes: 4096 });
+  const result = await runProcessLines(candidate, ["--version"], { timeout: 5_000, maxLines: 2, maxBytes: 4096, windowsCommandShim: isWindowsCommandShim(candidate) });
   return result.code === 0;
 }
 
 export async function findAstGrep() {
-  const names = process.platform === "win32" ? ["sg.exe", "ast-grep.exe"] : ["sg", "ast-grep"];
+  const cacheKey = astGrepDiscoveryKey();
+  if (astGrepCacheKey === cacheKey && astGrepCachePromise) return await astGrepCachePromise;
+
+  astGrepCacheKey = cacheKey;
+  astGrepCachePromise = findAstGrepUncached();
+  return await astGrepCachePromise;
+}
+
+async function findAstGrepUncached() {
+  const names = process.platform === "win32" ? ["sg.exe", "ast-grep.exe", "sg.cmd", "ast-grep.cmd"] : ["sg", "ast-grep"];
   const candidates = [];
 
   if (process.env.SIMPLE_CONTEXT_LIMITER_AST_GREP_PATH) candidates.push(process.env.SIMPLE_CONTEXT_LIMITER_AST_GREP_PATH);
@@ -68,6 +103,19 @@ export async function findAstGrep() {
   }
 
   return null;
+}
+
+function astGrepDiscoveryKey() {
+  return [
+    process.platform,
+    process.env.SIMPLE_CONTEXT_LIMITER_AST_GREP_PATH ?? "",
+    process.env.PATH ?? "",
+    process.env.Path ?? "",
+  ].join("\0");
+}
+
+function isWindowsCommandShim(filePath) {
+  return process.platform === "win32" && /\.(?:cmd|bat)$/i.test(filePath);
 }
 
 export async function searchTool(args) {
@@ -104,10 +152,11 @@ export async function searchTool(args) {
   const byteLimit = validateInteger(maxBytes, "search maxBytes", 1024, MAX_BYTES);
 
   if (engine === "ast") {
-    if (typeof language !== "string" || language.trim() === "") {
-      invalidParams("search language is required when engine is ast");
+    const astLanguage = normalizeAstLanguage(language, searchPath, include);
+    if (!astLanguage) {
+      invalidParams("search language is required when engine is ast unless it can be inferred from path or include");
     }
-    return await astSearchTool(pattern, searchPath, include, language, contextLimit, limit, lineLimit, byteLimit);
+    return await astSearchTool(pattern, searchPath, include, astLanguage, contextLimit, limit, lineLimit, byteLimit);
   }
 
   const rg = await findRg();
@@ -189,6 +238,19 @@ export async function searchTool(args) {
   };
 }
 
+function normalizeAstLanguage(language, searchPath, include) {
+  if (typeof language === "string" && language.trim() !== "") return language.trim();
+  return inferAstLanguage(searchPath) ?? inferAstLanguage(include);
+}
+
+function inferAstLanguage(value) {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return undefined;
+  const extension = path.extname(normalized.replace(/[)}\]]+$/g, ""));
+  return AST_LANGUAGE_BY_EXTENSION.get(extension);
+}
+
 async function astSearchTool(pattern, searchPath, include, language, contextLines, maxMatches, maxLines, maxBytes) {
   const sg = await findAstGrep();
   if (!sg) {
@@ -210,6 +272,7 @@ async function astSearchTool(pattern, searchPath, include, language, contextLine
     timeout: 120_000,
     maxLines: maxMatches + 1,
     maxBytes: MAX_READ_BYTES,
+    windowsCommandShim: isWindowsCommandShim(sg),
   });
   if (result.code !== 0 && !result.truncated && !result.outputTooLarge) {
     commandError(`ast-grep ${sgArgs.join(" ")}`, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge);

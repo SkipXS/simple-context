@@ -164,7 +164,7 @@ async function findRgForTest() {
 }
 
 async function findAstGrepForTest() {
-  const names = process.platform === "win32" ? ["sg.exe", "ast-grep.exe"] : ["sg", "ast-grep"];
+  const names = process.platform === "win32" ? ["sg.exe", "ast-grep.exe", "sg.cmd", "ast-grep.cmd"] : ["sg", "ast-grep"];
   const entries = (process.env.PATH ?? process.env.Path ?? "").split(process.platform === "win32" ? ";" : ":").filter(Boolean);
 
   for (const entry of entries) {
@@ -979,7 +979,7 @@ try {
 
   const missingAstLanguage = await request("tools/call", {
     name: "search",
-    arguments: { engine: "ast", pattern: "assert.equal($A, $B)", path: "smoke-test.js" },
+    arguments: { engine: "ast", pattern: "assert.equal($A, $B)", path: "." },
   });
   assert.equal(missingAstLanguage.error.code, -32602);
   assert.match(missingAstLanguage.error.message, /language is required/);
@@ -996,6 +996,14 @@ try {
     assert.equal(astSearch.result._meta.shownMatches, 5);
     assert.match(astSearch.result.content[0].text, /smoke-test\.js:/);
     assert.match(astSearch.result.content[0].text, /assert\.equal/);
+
+    const inferredAstSearch = await request("tools/call", {
+      name: "search",
+      arguments: { engine: "ast", pattern: "assert.equal($A, $B)", path: "smoke-test.js", maxMatches: 3 },
+    });
+    assert.ok(inferredAstSearch.result, JSON.stringify(inferredAstSearch));
+    assert.equal(inferredAstSearch.result._meta.language, "javascript");
+    assert.equal(inferredAstSearch.result._meta.shownMatches, 3);
 
     const astNoMatches = await request("tools/call", {
       name: "search",

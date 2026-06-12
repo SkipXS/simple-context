@@ -3,6 +3,17 @@ import { StringDecoder } from "node:string_decoder";
 import { COMMAND_SHELL, DEFAULT_COMMAND_TIMEOUT_MS, MAX_COMMAND_BYTES } from "./constants.js";
 import { formatOutput } from "./output.js";
 
+function spawnTarget(file, args, options = {}) {
+  if (options.windowsCommandShim && process.platform === "win32") {
+    return {
+      file: process.env.ComSpec || "cmd.exe",
+      args: ["/d", "/c", file, ...args],
+    };
+  }
+
+  return { file, args };
+}
+
 function terminateChild(child) {
   if (!child.pid) {
     child.kill();
@@ -131,7 +142,8 @@ function collectOutput(child, stdout, stderr, combined) {
 export async function runProcess(file, args, options = {}) {
   return await new Promise((resolve, reject) => {
     const started = Date.now();
-    const child = spawn(file, args, {
+    const target = spawnTarget(file, args, options);
+    const child = spawn(target.file, target.args, {
       cwd: options.cwd,
       env: options.env,
       shell: false,
@@ -236,7 +248,8 @@ export async function runCommand(command, options = {}) {
 export async function runProcessLines(file, args, options = {}) {
   return await new Promise((resolve, reject) => {
     const started = Date.now();
-    const child = spawn(file, args, {
+    const target = spawnTarget(file, args, options);
+    const child = spawn(target.file, target.args, {
       cwd: options.cwd,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],

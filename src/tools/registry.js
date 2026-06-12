@@ -158,7 +158,7 @@ export const tools = {
           pattern: { type: "string", description: "Regex pattern to search for" },
           path: { type: "string", description: "File or directory to search. Default: ." },
           include: { type: "string", description: "File glob to include, for example *.js or *.{ts,tsx}" },
-          language: { type: "string", description: "ast-grep language, required when engine=ast, for example javascript, typescript, kotlin, rust." },
+          language: { type: "string", description: "ast-grep language, for example javascript, typescript, kotlin, rust. Optional for engine=ast when it can be inferred from path or include." },
           contextLines: { type: "integer", minimum: 0, maximum: 10, description: "Lines before and after each match. Default: 0." },
           maxMatches: {
             type: "integer",
