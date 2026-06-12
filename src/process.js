@@ -52,11 +52,11 @@ export function commandErrorData(error) {
   return Object.keys(data).length > 0 ? data : undefined;
 }
 
-export function commandError(command, code, signal, stdout, stderr, timedOut = false, outputTooLarge = false) {
+export function commandError(command, code, signal, stdout, stderr, timedOut = false, outputTooLarge = false, timeoutMs = 120_000) {
   const detail = outputTooLarge
     ? `output exceeded ${MAX_COMMAND_BYTES} bytes`
     : timedOut
-      ? `timed out after 120000ms`
+      ? `timed out after ${timeoutMs}ms`
       : `exited with code ${code}`;
   const error = new Error(`Command failed: ${command} (${detail})`);
 
@@ -201,9 +201,11 @@ export async function runCommandResult(command) {
 
 export async function runCommand(command) {
   const result = await runCommandResult(command);
-  if (result.code === 0 && !result.signal && !result.timedOut) return { stdout: result.stdout, durationMs: result.durationMs };
+  if (result.code === 0 && !result.signal && !result.timedOut) {
+    return { stdout: result.stdout, durationMs: result.durationMs, outputTooLarge: result.outputTooLarge };
+  }
 
-  commandError(command, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge);
+  commandError(command, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge, 120_000);
 }
 
 export async function runProcessLines(file, args, options = {}) {

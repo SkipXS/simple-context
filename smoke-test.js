@@ -146,7 +146,9 @@ try {
   assert.doesNotMatch(longLine.text, /-\d+ lines omitted/);
   const emptyOutput = formatOutput("");
   assert.equal(emptyOutput.text, "(no output)");
-  assert.equal(emptyOutput.totalBytes, emptyOutput.returnedBytes);
+  assert.equal(emptyOutput.totalLines, 0);
+  assert.equal(emptyOutput.totalBytes, 0);
+  assert.ok(emptyOutput.returnedBytes > 0);
   const customByteLimit = formatOutput("x".repeat(8192), 60, 1024);
   assert.equal(customByteLimit.truncated, true);
   assert.ok(Buffer.byteLength(customByteLimit.text, "utf8") <= 1024);
@@ -316,6 +318,29 @@ try {
   assert.ok(byteLimitedRun.result._meta.returnedBytes <= 1024);
   assert.ok(byteLimitedRun.result._meta.savedBytes > 0);
 
+  const outputTooLargeCommand = isPowerShellConfigured()
+    ? `& ${shellQuote(process.execPath)} -e "process.stdout.write('x'.repeat(50000))"`
+    : `${shellQuote(process.execPath)} -e "process.stdout.write('x'.repeat(50000))"`;
+  const outputTooLargeRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
+    const { callTool } = await import('./src/tools.js');
+    const result = await callTool('context_run', { command: ${JSON.stringify(outputTooLargeCommand)}, maxLines: 200, maxBytes: 32768 });
+    console.log(JSON.stringify(result._meta));
+  `], {
+    cwd: import.meta.dirname,
+    timeout: 5_000,
+    env: {
+      ...process.env,
+      SIMPLE_CONTEXT_LIMITER_MAX_COMMAND_BYTES: "1024",
+      SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "0",
+    },
+  });
+  assert.equal(outputTooLargeRun.code, 0, outputTooLargeRun.stderr);
+  const outputTooLargeMeta = JSON.parse(outputTooLargeRun.stdout.trim());
+  assert.equal(outputTooLargeMeta.truncated, true);
+  assert.equal(outputTooLargeMeta.outputTooLarge, true);
+  assert.equal(outputTooLargeMeta.totalBytesKnown, false);
+  assert.ok(outputTooLargeMeta.savedBytes > 0);
+
   const invalidRunMaxLines = await request("tools/call", {
     name: "context_run",
     arguments: { command: "noop", maxLines: "20" },
@@ -383,6 +408,13 @@ try {
   });
   assert.equal(invalidLogsMaxBlocks.error.code, -32602);
   assert.match(invalidLogsMaxBlocks.error.message, /maxBlocks must be between 1 and 50/);
+
+  const invalidTestSummaryMaxBlocks = await request("tools/call", {
+    name: "context_test_summary",
+    arguments: { maxBlocks: 0 },
+  });
+  assert.equal(invalidTestSummaryMaxBlocks.error.code, -32602);
+  assert.match(invalidTestSummaryMaxBlocks.error.message, /context_test_summary maxBlocks must be between 1 and 50/);
 
   if (configuredShell().includes("bash")) {
     const bashOnly = await request("tools/call", {

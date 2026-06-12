@@ -18,13 +18,13 @@ export async function logsResult(args, toolName) {
   } = args ?? {};
 
   if (typeof command !== "string" || command.trim() === "") {
-    invalidParams("context_logs requires a non-empty command string");
+    invalidParams(`${toolName} requires a non-empty command string`);
   }
 
-  const blockLimit = validateInteger(maxBlocks, "context_logs maxBlocks", 1, 50);
-  const contextLimit = validateInteger(contextLines, "context_logs contextLines", 0, 20);
-  const lineLimit = validateInteger(maxLines, "context_logs maxLines", 10, 200);
-  const byteLimit = validateInteger(maxBytes, "context_logs maxBytes", 1024, MAX_BYTES);
+  const blockLimit = validateInteger(maxBlocks, `${toolName} maxBlocks`, 1, 50);
+  const contextLimit = validateInteger(contextLines, `${toolName} contextLines`, 0, 20);
+  const lineLimit = validateInteger(maxLines, `${toolName} maxLines`, 10, 200);
+  const byteLimit = validateInteger(maxBytes, `${toolName} maxBytes`, 1024, MAX_BYTES);
 
   const result = await runCommandResult(command);
   const outputText = combinedCommandOutput(result);
