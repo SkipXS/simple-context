@@ -96,7 +96,7 @@ export const tools = {
             minItems: 1,
             maxItems: 20,
             items: { type: "string" },
-            description: "Multiple file paths to read. Maximum 20. Do not combine with path.",
+            description: "Multiple file paths to read. Maximum 20. If path is also provided, it is prepended and duplicates are ignored.",
           },
           maxLines: {
             type: "integer",

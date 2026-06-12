@@ -298,6 +298,18 @@ try {
   assert.equal(fallbackFilesRun.code, 0, fallbackFilesRun.stderr);
   assert.match(JSON.parse(fallbackFilesRun.stdout.trim()), /sub\/a\.txt/);
 
+  const fallbackFileRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
+    const { callTool } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "src", "tools.js")).href)});
+    const result = await callTool('context_discover', { mode: 'files', path: 'sub/a.txt', maxFiles: 20 });
+    console.log(JSON.stringify(result.content[0].text));
+  `], {
+    cwd: fallbackFilesDir,
+    timeout: 5_000,
+    env: { ...process.env, PATH: "", Path: "" },
+  });
+  assert.equal(fallbackFileRun.code, 0, fallbackFileRun.stderr);
+  assert.equal(JSON.parse(fallbackFileRun.stdout.trim()), "sub/a.txt");
+
   const tree = await request("tools/call", {
     name: "context_discover",
     arguments: { mode: "tree", path: tempDir, maxDepth: 2, maxEntries: 20 },
@@ -314,10 +326,10 @@ try {
 
   const outline = await request("tools/call", {
     name: "context_discover",
-    arguments: { mode: "outline", path: join(import.meta.dirname, "src", "tools", "run.js"), maxSymbols: 20 },
+    arguments: { mode: "outline", path: join(import.meta.dirname, "src", "tools", "shared.js"), maxSymbols: 20 },
   });
   assert.ok(outline.result, JSON.stringify(outline));
-  assert.match(outline.result.content[0].text, /runTool/);
+  assert.match(outline.result.content[0].text, /invalidParams/);
 
   const testSummary = await request("tools/call", {
     name: "context_logs",
@@ -396,6 +408,7 @@ try {
   assert.equal(outputTooLargeMeta.truncated, true);
   assert.equal(outputTooLargeMeta.outputTooLarge, true);
   assert.equal(outputTooLargeMeta.totalBytesKnown, false);
+  assert.ok(Object.hasOwn(outputTooLargeMeta, "exitCode") || Object.hasOwn(outputTooLargeMeta, "signal"));
   assert.ok(outputTooLargeMeta.savedBytes > 0);
 
   const invalidRunMaxLines = await request("tools/call", {
@@ -565,12 +578,14 @@ try {
   assert.match(readMany.result.content[0].text, /dash\.txt/);
   assert.match(readMany.result.content[0].text, /-needle/);
 
-  const invalidReadPathAndPaths = await request("tools/call", {
+  const mergedReadPathAndPaths = await request("tools/call", {
     name: "context_read",
-    arguments: { path: largeFile, paths: [dashFile] },
+    arguments: { path: largeFile, paths: [dashFile, largeFile], maxLinesPerFile: 20, maxTotalBytes: 4096 },
   });
-  assert.equal(invalidReadPathAndPaths.error.code, -32602);
-  assert.match(invalidReadPathAndPaths.error.message, /either path or paths/);
+  assert.equal(mergedReadPathAndPaths.result._meta.filesRequested, 2);
+  assert.equal(mergedReadPathAndPaths.result._meta.filesRead, 2);
+  assert.match(mergedReadPathAndPaths.result.content[0].text, /large\.txt/);
+  assert.match(mergedReadPathAndPaths.result.content[0].text, /dash\.txt/);
 
   const invalidReadManyPaths = await request("tools/call", {
     name: "context_read",
@@ -1042,7 +1057,8 @@ try {
     const stagedStatusRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
       const { callTool } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "src", "tools.js")).href)});
       const status = await callTool('context_diff', { mode: 'status', staged: true, maxBytes: 4096 });
-      console.log(JSON.stringify({ text: status.content[0].text, meta: status._meta }));
+      const unstagedStatus = await callTool('context_diff', { mode: 'status', staged: false, maxBytes: 4096 });
+      console.log(JSON.stringify({ staged: { text: status.content[0].text, meta: status._meta }, unstaged: { text: unstagedStatus.content[0].text, meta: unstagedStatus._meta } }));
     `], {
       cwd: gitDir,
       timeout: 5_000,
@@ -1054,11 +1070,16 @@ try {
     });
     assert.equal(stagedStatusRun.code, 0, stagedStatusRun.stderr);
     const stagedStatusPayload = JSON.parse(stagedStatusRun.stdout.trim());
-    assert.match(stagedStatusPayload.text, /a\.txt/);
-    assert.doesNotMatch(stagedStatusPayload.text, /b\.txt/);
-    assert.doesNotMatch(stagedStatusPayload.text, /untracked\.txt/);
-    assert.equal(stagedStatusPayload.meta.staged, true);
-    assert.equal(stagedStatusPayload.meta.changedFiles, 1);
+    assert.match(stagedStatusPayload.staged.text, /a\.txt/);
+    assert.doesNotMatch(stagedStatusPayload.staged.text, /b\.txt/);
+    assert.doesNotMatch(stagedStatusPayload.staged.text, /untracked\.txt/);
+    assert.equal(stagedStatusPayload.staged.meta.staged, true);
+    assert.equal(stagedStatusPayload.staged.meta.changedFiles, 1);
+    assert.match(stagedStatusPayload.unstaged.text, /b\.txt/);
+    assert.doesNotMatch(stagedStatusPayload.unstaged.text, /a\.txt/);
+    assert.doesNotMatch(stagedStatusPayload.unstaged.text, /untracked\.txt/);
+    assert.equal(stagedStatusPayload.unstaged.meta.staged, false);
+    assert.equal(stagedStatusPayload.unstaged.meta.changedFiles, 1);
   }
 
   const statsRun = await runProcess(process.execPath, ["--input-type=module", "-e", `

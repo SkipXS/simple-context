@@ -65,6 +65,8 @@ async function listFiles(inputPath) {
 
   const root = process.cwd();
   const start = path.resolve(inputPath);
+  const stat = await fs.promises.stat(start);
+  if (stat.isFile()) return [path.relative(root, start).replaceAll(path.sep, "/")];
   return await walkFiles(root, start);
 }
 

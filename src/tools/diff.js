@@ -84,7 +84,7 @@ async function statusTool(diffPath, staged, maxLines, maxBytes) {
   }
 
   const lines = result.stdout.trimEnd().split("\n").filter(Boolean)
-    .filter((line) => !staged || line[0] !== " ")
+    .filter((line) => staged ? line[0] !== " " : line[1] !== " ")
     .map(formatStatusLine);
   const text = lines.join("\n") || "(no changed files)";
   const formatted = formatOutput(text, maxLines, maxBytes);

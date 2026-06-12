@@ -118,7 +118,10 @@ async function readLimitedText(res, maxBytes) {
 
       const remaining = maxBytes - total;
       if (value.byteLength > remaining) {
-        if (remaining > 0) chunks.push(value.slice(0, remaining));
+        if (remaining > 0) {
+          chunks.push(value.slice(0, remaining));
+          total += remaining;
+        }
         limited = true;
         await reader.cancel();
         break;

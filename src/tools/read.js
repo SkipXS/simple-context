@@ -7,15 +7,33 @@ import { recordStats } from "../stats.js";
 import { invalidParams, validateInteger } from "./shared.js";
 
 export async function readTool(args) {
-  if ((args ?? {}).path !== undefined && (args ?? {}).paths !== undefined) {
-    invalidParams("context_read accepts either path or paths, not both");
+  if ((args ?? {}).paths !== undefined) {
+    return await readManyTool({ ...args, paths: normalizeReadPaths(args) }, "context_read");
   }
-  if ((args ?? {}).paths !== undefined) return await readManyTool(args, "context_read");
 
   const result = await readFilePreview(args, "context_read");
   await recordStats("context_read", result._meta);
 
   return result;
+}
+
+function normalizeReadPaths(args) {
+  const merged = [];
+  if ((args ?? {}).path !== undefined) merged.push(args.path);
+  if (Array.isArray(args.paths)) merged.push(...args.paths);
+  else invalidParams("context_read requires paths to be an array when provided");
+
+  const paths = [];
+  const seen = new Set();
+  for (const filePath of merged) {
+    if (typeof filePath !== "string" || filePath.trim() === "") {
+      invalidParams("context_read paths must contain non-empty strings");
+    }
+    if (seen.has(filePath)) continue;
+    seen.add(filePath);
+    paths.push(filePath);
+  }
+  return paths;
 }
 
 export async function readManyTool(args, toolName = "context_read") {

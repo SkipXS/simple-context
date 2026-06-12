@@ -51,7 +51,7 @@ Unlike `context_run`, non-zero exits return a normal tool response with `exitCod
 
 ### `context_read`
 
-Reads local UTF-8 text files and returns safe previews. Use `path` for one file or `paths` for up to 20 files. Output is automatically truncated when it exceeds 60 lines or 32 KB. Override with `maxLines` or `maxBytes` per call. `context_read` allows up to 500 lines for targeted single-file ranges while keeping the 32 KB response cap.
+Reads local UTF-8 text files and returns safe previews. Use `path` for one file or `paths` for up to 20 files; if both are provided, they are merged as `[path, ...paths]` with duplicates ignored. Output is automatically truncated when it exceeds 60 lines or 32 KB. Override with `maxLines` or `maxBytes` per call. `context_read` allows up to 500 lines for targeted single-file ranges while keeping the 32 KB response cap.
 
 ```json
 { "path": "logs/app.log", "maxLines": 100, "maxBytes": 16384 }
@@ -78,7 +78,7 @@ Read multiple known files in one bounded response:
 { "paths": ["src/a.js", "src/b.js"], "maxLinesPerFile": 80, "maxBytesPerFile": 12000, "maxTotalBytes": 24000 }
 ```
 
-The tool accepts at most 20 paths. Each file uses the same preview behavior as single-file reads, then the combined response is capped by `maxTotalBytes`.
+The tool accepts at most 20 merged paths. Each file uses the same preview behavior as single-file reads, then the combined response is capped by `maxTotalBytes`.
 
 ### `context_search`
 
@@ -181,7 +181,7 @@ Review staged changes instead:
 { "staged": true, "maxFiles": 20, "maxHunks": 20 }
 ```
 
-`context_diff` only reports tracked working-tree or staged changes covered by `git diff`. It does not include untracked files unless they have been staged.
+`context_diff` only reports tracked working-tree or staged changes covered by `git diff`. It does not include untracked files unless they have been staged. In `mode: "status"`, `staged: false` shows only unstaged tracked changes and `staged: true` shows only staged tracked changes.
 Relative diff paths are resolved from the MCP server's `process.cwd()`.
 
 Show compact changed-file status instead of diff hunks:

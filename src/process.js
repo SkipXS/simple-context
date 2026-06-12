@@ -203,8 +203,18 @@ export async function runCommandResult(command, options = {}) {
 
 export async function runCommand(command, options = {}) {
   const result = await runCommandResult(command, options);
+  if (options.allowOutputTooLarge && result.outputTooLarge && !result.timedOut && result.stdout) {
+    return {
+      stdout: result.stdout,
+      durationMs: result.durationMs,
+      timeoutMs: result.timeoutMs,
+      outputTooLarge: result.outputTooLarge,
+      code: result.code,
+      signal: result.signal,
+    };
+  }
   if (result.code === 0 && !result.signal && !result.timedOut) {
-    return { stdout: result.stdout, durationMs: result.durationMs, timeoutMs: result.timeoutMs, outputTooLarge: result.outputTooLarge };
+    return { stdout: result.stdout, durationMs: result.durationMs, timeoutMs: result.timeoutMs, outputTooLarge: result.outputTooLarge, code: result.code, signal: result.signal };
   }
 
   commandError(command, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge, result.timeoutMs);
