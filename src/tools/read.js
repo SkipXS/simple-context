@@ -195,20 +195,50 @@ function normalizeLineRange(fromLine, toLine) {
 async function readLineRange(filePath, fromLine, toLine, maxLines, maxBytes, maxScanBytes, timeoutMs) {
   const input = fs.createReadStream(filePath);
   const decoder = new StringDecoder("utf8");
-  const lines = [];
-  let lineNumber = 0;
-  let bytes = 0;
+  const collector = createLineRangeCollector(fromLine, toLine, maxLines, maxBytes);
   let scannedBytes = 0;
-  let limited = false;
-  let rangeLimited = false;
   let scanLimited = false;
   let scanTimedOut = false;
-  let currentLine = "";
   const timer = setTimeout(() => {
     scanTimedOut = true;
     input.destroy(new Error("read range scan timed out"));
   }, timeoutMs);
   timer.unref();
+
+  try {
+    for await (const chunk of input) {
+      scannedBytes += chunk.byteLength;
+      if (!collector.processText(decoder.write(chunk))) {
+        input.destroy();
+        break;
+      }
+      if (collector.scannedLines < toLine && scannedBytes > maxScanBytes) {
+        scanLimited = true;
+        input.destroy();
+        break;
+      }
+    }
+
+    if (!collector.stopped && !scanLimited && !scanTimedOut && collector.scannedLines < toLine) {
+      collector.finishText(decoder.end());
+    }
+  } catch (error) {
+    if (!scanTimedOut) throw error;
+  } finally {
+    clearTimeout(timer);
+    input.destroy();
+  }
+
+  return collector.result(scannedBytes, scanLimited, scanTimedOut);
+}
+
+function createLineRangeCollector(fromLine, toLine, maxLines, maxBytes) {
+  const lines = [];
+  let lineNumber = 0;
+  let bytes = 0;
+  let limited = false;
+  let rangeLimited = false;
+  let currentLine = "";
 
   function shouldCollectCurrentLine() {
     const currentLineNumber = lineNumber + 1;
@@ -284,40 +314,30 @@ async function readLineRange(filePath, fromLine, toLine, maxLines, maxBytes, max
     return true;
   }
 
-  try {
-    for await (const chunk of input) {
-      scannedBytes += chunk.byteLength;
-      if (!processText(decoder.write(chunk))) {
-        input.destroy();
-        break;
-      }
-      if (lineNumber < toLine && scannedBytes > maxScanBytes) {
-        scanLimited = true;
-        input.destroy();
-        break;
-      }
-    }
-
-    if (!limited && !rangeLimited && !scanLimited && !scanTimedOut && lineNumber < toLine) {
-      processText(decoder.end());
-      if (currentLine) finishCurrentLine();
-    }
-  } catch (error) {
-    if (!scanTimedOut) throw error;
-  } finally {
-    clearTimeout(timer);
-    input.destroy();
-  }
-
   return {
-    text: lines.join("\n"),
-    limited,
-    rangeLimited,
-    returnedLines: lines.length,
-    scannedLines: lineNumber,
-    scannedBytes,
-    scanLimited,
-    scanTimedOut,
+    processText,
+    finishText(text) {
+      processText(text);
+      if (currentLine) finishCurrentLine();
+    },
+    get scannedLines() {
+      return lineNumber;
+    },
+    get stopped() {
+      return limited || rangeLimited;
+    },
+    result(scannedBytes, scanLimited, scanTimedOut) {
+      return {
+        text: lines.join("\n"),
+        limited,
+        rangeLimited,
+        returnedLines: lines.length,
+        scannedLines: lineNumber,
+        scannedBytes,
+        scanLimited,
+        scanTimedOut,
+      };
+    },
   };
 }
 

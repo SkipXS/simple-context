@@ -124,7 +124,8 @@ Use this before broad file reads or recursive shell commands. Pick a mode for th
 - `files` lists tracked files with optional regex filtering.
 - `tree` shows a bounded tree and skips heavy folders like `.git` and `node_modules`.
 - `outline` extracts imports, exports, functions, classes, and top-level declarations from one source file.
-- `search` searches with bounded context windows when `contextLines` is set.
+
+Use the separate `search` tool for bounded text or AST search with optional context windows.
 
 ```json
 { "mode": "summary", "maxLines": 80 }
@@ -230,7 +231,7 @@ Large output is returned as head + tail:
 
 The response always includes `_meta.truncated`. If it is `true`, the LLM can re-run with a higher `maxLines` or `maxBytes`, pre-filter the command, read a narrower `read` line range, or fall back to the native client tool when every line is genuinely needed.
 
-Each tool response also reports compact savings stats in `_meta`: `returnedBytes`, `savedBytes`, `savedPercent`, and `estimatedTokensSaved`. Token savings are approximate and use `savedBytes / 4` as a dependency-free estimate.
+Each tool response also reports compact savings stats in `_meta`: `returnedBytes`, `savedBytes`, `savedPercent`, and `estimatedTokensSaved`. Token savings are approximate and use `savedBytes / 4` as a dependency-free estimate. In `usage` `mode: "stats"`, those names describe aggregate usage stats; the formatted response savings use `responseReturnedBytes`, `responseSavedBytes`, `responseSavedPercent`, and `responseEstimatedTokensSaved`.
 
 `maxBytes` controls the formatted response preview size and accepts values from 1024 to 32768. It does not raise the separate file-read or download safety caps.
 
