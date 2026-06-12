@@ -29,27 +29,30 @@ async function filesMode(args) {
   const byteLimit = validateInteger(maxBytes, "context_discover maxBytes", 1024, MAX_BYTES);
 
   const started = Date.now();
-  const files = await listFiles(inputPath);
   let matcher;
   try {
     matcher = include ? new RegExp(include) : undefined;
   } catch {
     invalidParams("context_discover include must be a valid regular expression");
   }
-  const filtered = matcher ? files.filter((file) => matcher.test(file)) : files;
+  const { files, limited } = await listFiles(inputPath, matcher, fileLimit);
+  const filtered = matcher && !limited ? files.filter((file) => matcher.test(file)) : files;
   const shown = filtered.slice(0, fileLimit);
-  const text = filtered.length > shown.length
+  const text = limited
+    ? [...shown, "... more files omitted ..."].join("\n")
+    : filtered.length > shown.length
     ? [...shown, `... ${filtered.length - shown.length} more files omitted ...`].join("\n")
     : shown.join("\n") || "(no files)";
   const formatted = formatOutput(text, lineLimit, byteLimit);
   const meta = {
     mode: "files",
-    totalFiles: filtered.length,
+    totalFiles: limited ? undefined : filtered.length,
+    totalFilesKnown: !limited,
     shownFiles: shown.length,
     totalLines: formatted.totalLines,
     totalBytes: formatted.totalBytes,
     ...savingsMeta(formatted),
-    truncated: filtered.length > shown.length || formatted.truncated,
+    truncated: limited || filtered.length > shown.length || formatted.truncated,
     durationMs: Date.now() - started,
   };
   await recordStats("context_discover", meta);
@@ -57,29 +60,41 @@ async function filesMode(args) {
   return { content: [{ type: "text", text: formatted.text }], _meta: meta };
 }
 
-async function listFiles(inputPath) {
+async function listFiles(inputPath, matcher, maxFiles) {
   try {
     const git = await runProcess("git", ["ls-files", "--", inputPath], { cwd: process.cwd(), timeout: 30_000 });
-    if (git.code === 0) return git.stdout.split("\n").filter(Boolean);
+    if (git.code === 0) return { files: git.stdout.split("\n").filter(Boolean), limited: false };
   } catch {}
 
   const root = process.cwd();
   const start = path.resolve(inputPath);
   const stat = await fs.promises.stat(start);
-  if (stat.isFile()) return [path.relative(root, start).replaceAll(path.sep, "/")];
-  return await walkFiles(root, start);
+  if (stat.isFile()) return { files: [path.relative(root, start).replaceAll(path.sep, "/")].filter((file) => !matcher || matcher.test(file)), limited: false };
+  const state = { files: [], limited: false, matcher, limit: maxFiles + 1 };
+  await walkFiles(root, start, state);
+  const limited = state.limited || state.files.length > maxFiles;
+  return { files: state.files.slice(0, maxFiles), limited };
 }
 
-async function walkFiles(root, current) {
+async function walkFiles(root, current, state) {
+  if (state.files.length >= state.limit) {
+    state.limited = true;
+    return;
+  }
   const entries = await fs.promises.readdir(current, { withFileTypes: true });
-  const files = [];
   for (const entry of entries) {
+    if (state.files.length >= state.limit) {
+      state.limited = true;
+      return;
+    }
     if (entry.isDirectory() && SKIP_DIRS.has(entry.name)) continue;
     const entryPath = path.join(current, entry.name);
-    if (entry.isDirectory()) files.push(...await walkFiles(root, entryPath));
-    else if (entry.isFile()) files.push(path.relative(root, entryPath).replaceAll(path.sep, "/"));
+    if (entry.isDirectory()) await walkFiles(root, entryPath, state);
+    else if (entry.isFile()) {
+      const file = path.relative(root, entryPath).replaceAll(path.sep, "/");
+      if (!state.matcher || state.matcher.test(file)) state.files.push(file);
+    }
   }
-  return files;
 }
 
 async function treeMode(args) {
@@ -92,7 +107,7 @@ async function treeMode(args) {
 
   const started = Date.now();
   const root = path.resolve(inputPath);
-  const state = { entries: 0, omitted: 0 };
+  const state = { entries: 0, omitted: 0, depthLimited: false };
   const lines = [path.basename(root) || root];
   await appendTree(root, "", 1, depthLimit, entryLimit, state, lines);
   if (state.omitted > 0) lines.push(`... ${state.omitted} entries omitted ...`);
@@ -103,10 +118,11 @@ async function treeMode(args) {
     root,
     entriesShown: state.entries,
     entriesOmitted: state.omitted,
+    depthLimited: state.depthLimited,
     totalLines: formatted.totalLines,
     totalBytes: formatted.totalBytes,
     ...savingsMeta(formatted),
-    truncated: state.omitted > 0 || formatted.truncated,
+    truncated: state.omitted > 0 || state.depthLimited || formatted.truncated,
     durationMs: Date.now() - started,
   };
   await recordStats("context_discover", meta);
@@ -128,7 +144,10 @@ async function appendTree(directory, prefix, depth, maxDepth, maxEntries, state,
     const last = index === entries.length - 1;
     lines.push(`${prefix}${last ? "└──" : "├──"} ${entry.name}${entry.isDirectory() ? "/" : ""}`);
     state.entries++;
-    if (entry.isDirectory()) await appendTree(path.join(directory, entry.name), `${prefix}${last ? "    " : "│   "}`, depth + 1, maxDepth, maxEntries, state, lines);
+    if (entry.isDirectory()) {
+      if (depth >= maxDepth) state.depthLimited = true;
+      else await appendTree(path.join(directory, entry.name), `${prefix}${last ? "    " : "│   "}`, depth + 1, maxDepth, maxEntries, state, lines);
+    }
   }
 }
 

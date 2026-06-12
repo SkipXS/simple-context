@@ -37,16 +37,30 @@ function normalizeReadPaths(args) {
 }
 
 export async function readManyTool(args, toolName = "context_read") {
-  const { paths, maxLinesPerFile = MAX_LINES, maxBytesPerFile = MAX_BYTES, maxTotalBytes = MAX_BYTES } = args ?? {};
+  const {
+    paths,
+    maxLines,
+    maxBytes,
+    maxLinesPerFile = maxLines ?? MAX_LINES,
+    maxBytesPerFile = maxBytes ?? MAX_BYTES,
+    maxTotalLines = 200,
+    maxTotalBytes = MAX_BYTES,
+    fromLine,
+    toLine,
+  } = args ?? {};
   if (!Array.isArray(paths) || paths.length === 0) {
     invalidParams(`${toolName} requires a non-empty paths array`);
   }
   if (paths.length > 20) {
     invalidParams(`${toolName} paths must contain at most 20 files`);
   }
+  if (fromLine !== undefined || toLine !== undefined) {
+    invalidParams(`${toolName} fromLine and toLine are only supported with a single path`);
+  }
 
   const lineLimit = validateInteger(maxLinesPerFile, `${toolName} maxLinesPerFile`, 10, 500);
   const byteLimit = validateInteger(maxBytesPerFile, `${toolName} maxBytesPerFile`, 1024, MAX_BYTES);
+  const totalLineLimit = validateInteger(maxTotalLines, `${toolName} maxTotalLines`, 10, 500);
   const totalLimit = validateInteger(maxTotalBytes, `${toolName} maxTotalBytes`, 1024, MAX_BYTES);
   const results = [];
 
@@ -60,12 +74,13 @@ export async function readManyTool(args, toolName = "context_read") {
   const combined = results
     .map((result) => `--- ${result._meta.path} ---\n${result.content[0].text}`)
     .join("\n\n");
-  const formatted = formatOutput(combined, 200, totalLimit);
+  const formatted = formatOutput(combined, totalLineLimit, totalLimit);
   const totalBytes = results.reduce((sum, result) => sum + result._meta.totalBytes, 0);
   const contextSavings = savingsForReturnedBytes(totalBytes, formatted.returnedBytes);
   const meta = {
     filesRequested: paths.length,
     filesRead: results.length,
+    maxTotalLines: totalLineLimit,
     totalLines: formatted.totalLines,
     totalBytes,
     ...contextSavings,

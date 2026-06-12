@@ -51,7 +51,7 @@ Unlike `context_run`, non-zero exits return a normal tool response with `exitCod
 
 ### `context_read`
 
-Reads local UTF-8 text files and returns safe previews. Use `path` for one file or `paths` for up to 20 files; if both are provided, they are merged as `[path, ...paths]` with duplicates ignored. Output is automatically truncated when it exceeds 60 lines or 32 KB. Override with `maxLines` or `maxBytes` per call. `context_read` allows up to 500 lines for targeted single-file ranges while keeping the 32 KB response cap.
+Reads local UTF-8 text files and returns safe previews. Use `path` for one file or `paths` for up to 20 files; if both are provided, they are merged as `[path, ...paths]` with duplicates ignored. Output is automatically truncated when it exceeds 60 lines or 32 KB. Override with `maxLines` or `maxBytes` per call. In multi-file mode, `maxLines` and `maxBytes` act as per-file defaults unless `maxLinesPerFile` or `maxBytesPerFile` are set. `context_read` allows up to 500 lines for targeted single-file ranges while keeping the 32 KB response cap.
 
 ```json
 { "path": "logs/app.log", "maxLines": 100, "maxBytes": 16384 }
@@ -70,7 +70,7 @@ For larger targeted source sections, raise `maxLines` up to 500 while keeping `f
 ```
 
 File reads are capped at 10 MB by default before formatting. Override with `SIMPLE_CONTEXT_LIMITER_MAX_READ_BYTES` if needed.
-When `fromLine` or `toLine` is used, the file is streamed line-by-line and `maxLines` still caps the returned range.
+When `fromLine` or `toLine` is used, the file is streamed line-by-line and `maxLines` still caps the returned range. Line ranges are only supported with a single `path`, not with `paths`.
 
 Read multiple known files in one bounded response:
 
@@ -78,7 +78,7 @@ Read multiple known files in one bounded response:
 { "paths": ["src/a.js", "src/b.js"], "maxLinesPerFile": 80, "maxBytesPerFile": 12000, "maxTotalBytes": 24000 }
 ```
 
-The tool accepts at most 20 merged paths. Each file uses the same preview behavior as single-file reads, then the combined response is capped by `maxTotalBytes`.
+The tool accepts at most 20 merged paths. Each file uses the same preview behavior as single-file reads, then the combined response is capped by `maxTotalBytes` and `maxTotalLines`.
 
 ### `context_search`
 
@@ -145,7 +145,7 @@ Use `context_logs` for test/check commands when you want error blocks or a compa
 
 ### Usage Reports
 
-simple-context-limiter records local usage metadata by default in `~/.simple-context-limiter/usage.jsonl`. It does not store tool outputs and does not upload anything. For shell commands, it stores a command class such as `git-history`, `dependencies`, or `infra-logs`, not the raw command string.
+simple-context-limiter records local usage metadata by default in `~/.simple-context-limiter/usage.jsonl`, including the current project path (`process.cwd()`). It does not store tool outputs and does not upload anything. For shell commands, it stores a command class such as `git-history`, `dependencies`, or `infra-logs`, not the raw command string. The log is pruned after appends and capped by `SIMPLE_CONTEXT_LIMITER_USAGE_LOG_MAX_BYTES` (default 10 MB).
 
 Use `context_usage` to see aggregate savings stats or which new tools may be worth adding from local usage patterns:
 
@@ -352,6 +352,7 @@ For Pi:
 | `SIMPLE_CONTEXT_LIMITER_CACHE_MAX_BYTES` | `52428800` | Max cached fetch content bytes kept on disk |
 | `SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH` | unset | Set to `1` to allow non-HTTP fetch schemes |
 | `SIMPLE_CONTEXT_LIMITER_USAGE_LOG` | enabled | Set to `0` to disable local usage logging |
+| `SIMPLE_CONTEXT_LIMITER_USAGE_LOG_MAX_BYTES` | `10485760` | Max usage log bytes kept on disk |
 | `SIMPLE_CONTEXT_LIMITER_DISABLE_USAGE_LOG` | unset | Set to `1` to disable local usage logging |
 
 ## Security / Trust Model

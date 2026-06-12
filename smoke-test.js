@@ -305,17 +305,22 @@ try {
   const fallbackFilesDir = join(tempDir, "fallback-files");
   await mkdir(join(fallbackFilesDir, "sub"), { recursive: true });
   await writeFile(join(fallbackFilesDir, "sub", "a.txt"), "a\n", "utf8");
+  for (let i = 0; i < 10; i++) await writeFile(join(fallbackFilesDir, "sub", `extra-${i}.txt`), `${i}\n`, "utf8");
   const fallbackFilesRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
     const { callTool } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "src", "tools.js")).href)});
-    const result = await callTool('context_discover', { mode: 'files', path: 'sub', maxFiles: 20 });
-    console.log(JSON.stringify(result.content[0].text));
+    const result = await callTool('context_discover', { mode: 'files', path: 'sub', maxFiles: 3 });
+    console.log(JSON.stringify({ text: result.content[0].text, meta: result._meta }));
   `], {
     cwd: fallbackFilesDir,
     timeout: 5_000,
     env: { ...process.env, PATH: "", Path: "" },
   });
   assert.equal(fallbackFilesRun.code, 0, fallbackFilesRun.stderr);
-  assert.match(JSON.parse(fallbackFilesRun.stdout.trim()), /sub\/a\.txt/);
+  const fallbackFilesPayload = JSON.parse(fallbackFilesRun.stdout.trim());
+  assert.match(fallbackFilesPayload.text, /more files omitted/);
+  assert.equal(fallbackFilesPayload.meta.shownFiles, 3);
+  assert.equal(fallbackFilesPayload.meta.totalFilesKnown, false);
+  assert.equal(fallbackFilesPayload.meta.truncated, true);
 
   const fallbackFileRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
     const { callTool } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "src", "tools.js")).href)});
@@ -335,6 +340,13 @@ try {
   });
   assert.ok(tree.result, JSON.stringify(tree));
   assert.match(tree.result.content[0].text, /large\.txt/);
+
+  const depthLimitedTree = await request("tools/call", {
+    name: "context_discover",
+    arguments: { mode: "tree", path: fallbackFilesDir, maxDepth: 1, maxEntries: 20 },
+  });
+  assert.equal(depthLimitedTree.result._meta.depthLimited, true);
+  assert.equal(depthLimitedTree.result._meta.truncated, true);
 
   const repoSummary = await request("tools/call", {
     name: "context_discover",
@@ -617,6 +629,20 @@ try {
   assert.match(readMany.result.content[0].text, /large\.txt/);
   assert.match(readMany.result.content[0].text, /dash\.txt/);
   assert.match(readMany.result.content[0].text, /-needle/);
+
+  const readManyMaxFallback = await request("tools/call", {
+    name: "context_read",
+    arguments: { paths: [largeFile, dashFile], maxLines: 20, maxBytes: 4096, maxTotalLines: 20, maxTotalBytes: 4096 },
+  });
+  assert.equal(readManyMaxFallback.result._meta.maxTotalLines, 20);
+  assert.equal(readManyMaxFallback.result._meta.files.length, 2);
+
+  const invalidReadManyRange = await request("tools/call", {
+    name: "context_read",
+    arguments: { paths: [largeFile], fromLine: 1 },
+  });
+  assert.equal(invalidReadManyRange.error.code, -32602);
+  assert.match(invalidReadManyRange.error.message, /single path/);
 
   const mergedReadPathAndPaths = await request("tools/call", {
     name: "context_read",
@@ -1194,14 +1220,18 @@ try {
   assert.equal(usagePayload.usageLog.includes("git log --oneline"), false);
 
   const usagePruneRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
-    import { stat } from 'node:fs/promises';
+    import { readFile, stat } from 'node:fs/promises';
     import { join } from 'node:path';
     const { callTool } = await import('./src/tools.js');
     const command = ${JSON.stringify(isPowerShellConfigured() ? `& ${shellQuote(process.execPath)} -e "console.log('ok')"` : `${shellQuote(process.execPath)} -e "console.log('ok')"`)};
     for (let i = 0; i < 40; i++) await callTool('context_run', { command });
     const file = join(process.env.HOME, '.simple-context-limiter', 'usage.jsonl');
     const fileStat = await stat(file);
-    console.log(JSON.stringify({ size: fileStat.size }));
+    const text = await readFile(file, 'utf8');
+    const valid = text.split(String.fromCharCode(10)).filter(Boolean).every((line) => {
+      try { JSON.parse(line); return true; } catch { return false; }
+    });
+    console.log(JSON.stringify({ size: fileStat.size, valid }));
   `], {
     cwd: import.meta.dirname,
     timeout: 10_000,
@@ -1214,7 +1244,9 @@ try {
     },
   });
   assert.equal(usagePruneRun.code, 0, usagePruneRun.stderr);
-  assert.ok(JSON.parse(usagePruneRun.stdout.trim()).size <= 2048);
+  const usagePrunePayload = JSON.parse(usagePruneRun.stdout.trim());
+  assert.ok(usagePrunePayload.size <= 2048);
+  assert.equal(usagePrunePayload.valid, true);
 
   const usageOptOutRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
     import { readFile } from 'node:fs/promises';
