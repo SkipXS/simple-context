@@ -157,8 +157,8 @@ function recommendTools(commandSummaries, toolSummaries) {
   addRecommendation(recommendations, commandMap.get("file-read"), "context_read_guidance", "Improve instructions or add file-read conveniences.");
 
   const search = commandMap.get("search-discovery");
-  const grepTool = toolMap.get("context_grep_context");
-  if (search && (!grepTool || search.calls > grepTool.calls)) {
+  const searchTool = toolMap.get("context_search");
+  if (search && (!searchTool || search.calls > searchTool.calls)) {
     addRecommendation(recommendations, search, "context_search_workflow", "Improve search plus surrounding file-context workflows.");
   }
 

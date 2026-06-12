@@ -38,18 +38,16 @@ function rpcCode(error) {
   return Number.isInteger(error.code) ? error.code : -32000;
 }
 
-const instructions = "Default to context_run, context_logs, context_read, context_read_many, context_search, context_files, context_tree, context_repo_summary, context_file_outline, context_test_summary, context_changed_files, context_grep_context, context_fetch, and context_diff for exploratory commands, logs, file previews, searches, repo overview, tests, web pages, and git previews. "
+const instructions = "Default to context_run, context_logs, context_read, context_search, context_files, context_tree, context_repo_summary, context_file_outline, context_fetch, context_diff, and context_usage for exploratory commands, logs, file previews, searches, repo overview, tests, web pages, git previews, and usage stats. "
   + "Use context_run instead of bash/terminal for commands that may produce large output. "
   + "Use context_logs instead of context_run for tests, builds, lints, server logs, and other output where errors may appear in the middle. "
-  + "Use context_test_summary for test/check commands when you want extracted failures and compact metadata. "
-  + "Use context_read instead of cat/type/Get-Content for local file previews, or context_read_many when you need several known files. "
-  + "Use context_search instead of raw rg/grep commands for bounded local search results. "
-  + "Use context_grep_context when you need small context windows around matches instead of search plus multiple reads. "
+  + "Use context_read instead of cat/type/Get-Content for local file previews; pass paths when you need several known files. "
+  + "Use context_search instead of raw rg/grep commands for bounded local search results; pass contextLines when you need surrounding lines. "
   + "Use context_files, context_tree, context_repo_summary, and context_file_outline for repo discovery before broad file reads. "
-  + "Use context_changed_files before git diff when you only need changed file names/status. "
+  + "Use context_diff with mode=status before full diffs when you only need changed file names/status. "
   + "Use context_fetch instead of web_fetch/webfetch for pages you do not need as raw HTML. "
   + "Use context_diff instead of raw git diff when reviewing working tree or staged changes. "
-  + "Use context_usage_report when deciding which additional context tools would be valuable from local usage patterns. "
+  + "Use context_usage for aggregate savings stats or local usage-pattern reports. "
   + "Use native shell/read/fetch/diff tools only when you specifically need complete output, exact stderr/exit behavior, interactivity, or unsupported behavior. "
   + "Read the _meta field after each call: if truncated is true, retry with a narrower query/range or higher maxLines/maxBytes before falling back to native tools.";
 

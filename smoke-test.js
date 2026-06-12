@@ -197,19 +197,14 @@ try {
     "context_run",
     "context_logs",
     "context_read",
-    "context_read_many",
     "context_search",
     "context_files",
     "context_tree",
     "context_repo_summary",
     "context_file_outline",
-    "context_test_summary",
-    "context_changed_files",
-    "context_grep_context",
     "context_fetch",
     "context_diff",
-    "context_stats",
-    "context_usage_report",
+    "context_usage",
   ]);
 
   const unknownTool = await request("tools/call", {
@@ -264,7 +259,7 @@ try {
   assert.match(outline.result.content[0].text, /runTool/);
 
   const testSummary = await request("tools/call", {
-    name: "context_test_summary",
+    name: "context_logs",
     arguments: {
       command: isPowerShellConfigured()
         ? `& ${shellQuote(process.execPath)} -e "console.error('ReferenceError: missing'); process.exit(2)"`
@@ -409,13 +404,6 @@ try {
   assert.equal(invalidLogsMaxBlocks.error.code, -32602);
   assert.match(invalidLogsMaxBlocks.error.message, /maxBlocks must be between 1 and 50/);
 
-  const invalidTestSummaryMaxBlocks = await request("tools/call", {
-    name: "context_test_summary",
-    arguments: { maxBlocks: 0 },
-  });
-  assert.equal(invalidTestSummaryMaxBlocks.error.code, -32602);
-  assert.match(invalidTestSummaryMaxBlocks.error.message, /context_test_summary maxBlocks must be between 1 and 50/);
-
   if (configuredShell().includes("bash")) {
     const bashOnly = await request("tools/call", {
       name: "context_run",
@@ -468,7 +456,7 @@ try {
   assert.match(read.result.content[0].text, /file line 299/);
 
   const readMany = await request("tools/call", {
-    name: "context_read_many",
+    name: "context_read",
     arguments: { paths: [largeFile, dashFile], maxLinesPerFile: 20, maxTotalBytes: 4096 },
   });
   assert.equal(readMany.result._meta.filesRequested, 2);
@@ -481,7 +469,7 @@ try {
   assert.match(readMany.result.content[0].text, /-needle/);
 
   const invalidReadManyPaths = await request("tools/call", {
-    name: "context_read_many",
+    name: "context_read",
     arguments: { paths: Array.from({ length: 21 }, (_, i) => `${i}.txt`) },
   });
   assert.equal(invalidReadManyPaths.error.code, -32602);
@@ -587,7 +575,7 @@ try {
     assert.match(dashPattern.result.content[0].text, /-needle/);
 
     const grepContext = await request("tools/call", {
-      name: "context_grep_context",
+      name: "context_search",
       arguments: { pattern: "file line 29", path: largeFile, contextLines: 1, maxMatches: 3 },
     });
     assert.ok(grepContext.result, JSON.stringify(grepContext));
@@ -610,7 +598,7 @@ try {
     assert.equal(noMatchSearch.result._meta.totalBytes, noMatchSearch.result._meta.returnedBytes);
 
     const noMatchGrepContext = await request("tools/call", {
-      name: "context_grep_context",
+      name: "context_search",
       arguments: { pattern: "does-not-exist", path: largeFile, maxMatches: 5 },
     });
     assert.equal(noMatchGrepContext.result.content[0].text, "(no matches)");
@@ -834,7 +822,7 @@ try {
       const { callTool } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "src", "tools.js")).href)});
       const diff = await callTool('context_diff', { maxFiles: 1, maxHunks: 1, maxBytes: 4096 });
       const blankPathDiff = await callTool('context_diff', { path: '', maxBytes: 4096 });
-      const changedFiles = await callTool('context_changed_files', { maxBytes: 4096 });
+      const changedFiles = await callTool('context_diff', { mode: 'status', maxBytes: 4096 });
       const noStagedDiff = await callTool('context_diff', { staged: true, maxBytes: 4096 });
       console.log(JSON.stringify({ diff: { text: diff.content[0].text, meta: diff._meta }, blankPathDiff: { text: blankPathDiff.content[0].text, meta: blankPathDiff._meta }, changedFiles: { text: changedFiles.content[0].text, meta: changedFiles._meta }, noStagedDiff: { text: noStagedDiff.content[0].text, meta: noStagedDiff._meta } }));
     `], {
@@ -875,7 +863,7 @@ try {
     await callTool('context_run', { command: ${JSON.stringify(`${shellQuote(process.execPath)} -e "console.log('x'.repeat(50000))"`)}, maxLines: 20 });
     await callTool('context_run', { command: ${JSON.stringify(`${shellQuote(process.execPath)} -e "console.log('ok')"`)}, maxLines: 20 });
     await callTool('context_fetch', { url: 'data:text/plain,' + encodeURIComponent('x'.repeat(2048)), force: true, maxLines: 20 });
-    const stats = await callTool('context_stats', {});
+    const stats = await callTool('context_usage', {});
     console.log(JSON.stringify({ text: stats.content[0].text, meta: stats._meta }));
   `], {
     cwd: import.meta.dirname,
@@ -912,7 +900,7 @@ try {
       try { await callTool('context_run', { command: 'git log --oneline -1', maxLines: 20 }); } catch {}
     }
     await callTool('context_run', { command: ${JSON.stringify(isPowerShellConfigured() ? `& ${shellQuote(process.execPath)} -e "console.log('x'.repeat(50000))"` : `${shellQuote(process.execPath)} -e "console.log('x'.repeat(50000))"`)}, maxLines: 20 });
-    const report = await callTool('context_usage_report', { maxEvents: 20 });
+    const report = await callTool('context_usage', { mode: 'report', maxEvents: 20 });
     const usageLog = await readFile(join(process.env.HOME, '.simple-context-limiter', 'usage.jsonl'), 'utf8');
     console.log(JSON.stringify({ text: report.content[0].text, meta: report._meta, usageLog }));
   `], {

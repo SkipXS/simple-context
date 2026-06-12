@@ -48,6 +48,7 @@ export async function searchTool(args) {
     pattern,
     path: searchPath = ".",
     include,
+    contextLines = 0,
     maxMatches = 100,
     maxLines = MAX_LINES,
     maxBytes = MAX_BYTES,
@@ -62,6 +63,7 @@ export async function searchTool(args) {
   if (include !== undefined && typeof include !== "string") {
     invalidParams("context_search include must be a string when provided");
   }
+  const contextLimit = validateInteger(contextLines, "context_search contextLines", 0, 10);
   const limit = validateInteger(maxMatches, "context_search maxMatches", 1, 1000);
   const lineLimit = validateInteger(maxLines, "context_search maxLines", 10, 200);
   const byteLimit = validateInteger(maxBytes, "context_search maxBytes", 1024, MAX_BYTES);
@@ -73,6 +75,10 @@ export async function searchTool(args) {
     );
     error.code = -32000;
     throw error;
+  }
+
+  if (contextLimit > 0) {
+    return await searchWithContext(rg, pattern, searchPath, include, contextLimit, limit, lineLimit, byteLimit);
   }
 
   const rgArgs = ["--line-number", "--with-filename", "--color", "never", "--no-heading"];
@@ -139,4 +145,59 @@ export async function searchTool(args) {
     content: [{ type: "text", text: formatted.text }],
     _meta: meta,
   };
+}
+
+async function searchWithContext(rg, pattern, searchPath, include, contextLines, maxMatches, maxLines, maxBytes) {
+  const started = Date.now();
+  const rgArgs = ["--line-number", "--with-filename", "--color", "never", "--no-heading", "-C", String(contextLines)];
+  if (include) rgArgs.push("--glob", include);
+  rgArgs.push("--", pattern, searchPath);
+
+  const result = await runProcessLines(rg, rgArgs, {
+    cwd: process.cwd(),
+    timeout: 120_000,
+    maxLines: maxMatches * (contextLines * 2 + 3),
+    maxBytes: MAX_READ_BYTES,
+  });
+  if (result.code === 1) return await noMatches(rg, result.durationMs, contextLines);
+  if (result.code !== 0 && !result.truncated && !result.outputTooLarge) {
+    commandError(`rg ${rgArgs.join(" ")}`, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge);
+  }
+
+  const text = result.lines.join("\n") || "(no matches)";
+  const formatted = formatOutput(text, maxLines, maxBytes);
+  const meta = {
+    rgPath: rg,
+    contextLines,
+    linesRead: result.lines.length,
+    totalLines: formatted.totalLines,
+    totalBytes: formatted.totalBytes,
+    ...savingsMeta(formatted),
+    truncated: result.truncated || result.outputTooLarge || formatted.truncated,
+    durationMs: Date.now() - started,
+  };
+  await recordStats("context_search", meta);
+
+  return { content: [{ type: "text", text: formatted.text }], _meta: meta };
+}
+
+async function noMatches(rg, durationMs, contextLines) {
+  const text = "(no matches)";
+  const totalBytes = Buffer.byteLength(text, "utf8");
+  const meta = {
+    rgPath: rg,
+    contextLines,
+    linesRead: 0,
+    totalLines: 1,
+    totalBytes,
+    returnedBytes: totalBytes,
+    savedBytes: 0,
+    savedPercent: 0,
+    estimatedTokensSaved: 0,
+    truncated: false,
+    durationMs,
+  };
+  await recordStats("context_search", meta);
+
+  return { content: [{ type: "text", text }], _meta: meta };
 }

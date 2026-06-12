@@ -7,31 +7,33 @@ import { recordStats } from "../stats.js";
 import { invalidParams, validateInteger } from "./shared.js";
 
 export async function readTool(args) {
+  if ((args ?? {}).paths !== undefined) return await readManyTool(args, "context_read");
+
   const result = await readFilePreview(args, "context_read");
   await recordStats("context_read", result._meta);
 
   return result;
 }
 
-export async function readManyTool(args) {
+export async function readManyTool(args, toolName = "context_read") {
   const { paths, maxLinesPerFile = MAX_LINES, maxBytesPerFile = MAX_BYTES, maxTotalBytes = MAX_BYTES } = args ?? {};
   if (!Array.isArray(paths) || paths.length === 0) {
-    invalidParams("context_read_many requires a non-empty paths array");
+    invalidParams(`${toolName} requires a non-empty paths array`);
   }
   if (paths.length > 20) {
-    invalidParams("context_read_many paths must contain at most 20 files");
+    invalidParams(`${toolName} paths must contain at most 20 files`);
   }
 
-  const lineLimit = validateInteger(maxLinesPerFile, "context_read_many maxLinesPerFile", 10, 200);
-  const byteLimit = validateInteger(maxBytesPerFile, "context_read_many maxBytesPerFile", 1024, MAX_BYTES);
-  const totalLimit = validateInteger(maxTotalBytes, "context_read_many maxTotalBytes", 1024, MAX_BYTES);
+  const lineLimit = validateInteger(maxLinesPerFile, `${toolName} maxLinesPerFile`, 10, 200);
+  const byteLimit = validateInteger(maxBytesPerFile, `${toolName} maxBytesPerFile`, 1024, MAX_BYTES);
+  const totalLimit = validateInteger(maxTotalBytes, `${toolName} maxTotalBytes`, 1024, MAX_BYTES);
   const results = [];
 
   for (const filePath of paths) {
     if (typeof filePath !== "string" || filePath.trim() === "") {
-      invalidParams("context_read_many paths must contain non-empty strings");
+      invalidParams(`${toolName} paths must contain non-empty strings`);
     }
-    results.push(await readFilePreview({ path: filePath, maxLines: lineLimit, maxBytes: byteLimit }, "context_read_many"));
+    results.push(await readFilePreview({ path: filePath, maxLines: lineLimit, maxBytes: byteLimit }, toolName));
   }
 
   const combined = results
@@ -57,7 +59,7 @@ export async function readManyTool(args) {
       fileReadLimited: result._meta.fileReadLimited,
     })),
   };
-  await recordStats("context_read_many", meta);
+  await recordStats(toolName, meta);
 
   return {
     content: [{ type: "text", text: formatted.text }],

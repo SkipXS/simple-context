@@ -7,6 +7,7 @@ import { invalidParams, savingsForText, validateInteger } from "./shared.js";
 export async function diffTool(args) {
   const {
     path: diffPath,
+    mode = "diff",
     staged = false,
     stat = true,
     maxFiles = 20,
@@ -20,6 +21,7 @@ export async function diffTool(args) {
     if (typeof diffPath !== "string") invalidParams("context_diff path must be a string when provided");
     if (diffPath.trim() === "") normalizedDiffPath = undefined;
   }
+  if (mode !== "diff" && mode !== "status") invalidParams("context_diff mode must be \"diff\" or \"status\"");
   if (typeof staged !== "boolean") {
     invalidParams("context_diff staged must be a boolean when provided");
   }
@@ -31,6 +33,8 @@ export async function diffTool(args) {
   const hunkLimit = validateInteger(maxHunks, "context_diff maxHunks", 1, 200);
   const lineLimit = validateInteger(maxLines, "context_diff maxLines", 10, 200);
   const byteLimit = validateInteger(maxBytes, "context_diff maxBytes", 1024, MAX_BYTES);
+
+  if (mode === "status") return await statusTool(normalizedDiffPath, lineLimit, byteLimit);
 
   const started = Date.now();
   const diffArgs = gitDiffArgs(staged, [], normalizedDiffPath);
@@ -51,6 +55,7 @@ export async function diffTool(args) {
     totalBytes: diffSavings.totalBytes,
     ...diffSavings,
     truncated: limitedDiff.filesLimited || limitedDiff.hunksLimited || formatted.truncated,
+    mode,
     staged,
     stat,
     filesChanged: countDiffFiles(fullDiff),
@@ -67,6 +72,40 @@ export async function diffTool(args) {
     content: [{ type: "text", text: formatted.text }],
     _meta: meta,
   };
+}
+
+async function statusTool(diffPath, maxLines, maxBytes) {
+  const started = Date.now();
+  const args = ["status", "--porcelain=v1"];
+  if (diffPath !== undefined) args.push("--", diffPath);
+  const result = await runProcess("git", args, { cwd: process.cwd(), timeout: 30_000 });
+  if (result.code !== 0 || result.timedOut || result.outputTooLarge) {
+    commandError(`git ${args.join(" ")}`, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge, 30_000);
+  }
+
+  const lines = result.stdout.trimEnd().split("\n").filter(Boolean).map(formatStatusLine);
+  const text = lines.join("\n") || "(no changed files)";
+  const formatted = formatOutput(text, maxLines, maxBytes);
+  const meta = {
+    mode: "status",
+    path: diffPath,
+    changedFiles: lines.length,
+    totalLines: formatted.totalLines,
+    totalBytes: formatted.totalBytes,
+    returnedBytes: formatted.returnedBytes,
+    savedBytes: formatted.savedBytes,
+    savedPercent: formatted.savedPercent,
+    estimatedTokensSaved: formatted.estimatedTokensSaved,
+    truncated: formatted.truncated,
+    durationMs: Date.now() - started,
+  };
+  await recordStats("context_diff", meta);
+
+  return { content: [{ type: "text", text: formatted.text }], _meta: meta };
+}
+
+function formatStatusLine(line) {
+  return `${line.slice(0, 2)} ${line.slice(3)}`;
 }
 
 function gitDiffArgs(staged, extraArgs, diffPath) {

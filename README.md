@@ -1,6 +1,6 @@
 # simple-context-limiter
 
-A minimal MCP server that keeps large command, log, file, search, repo-discovery, web, and git diff output out of your LLM context. Sixteen tools, zero dependencies, works in MCP-compatible clients such as Pi, OpenCode, Claude Code, and KiloCode.
+A minimal MCP server that keeps large command, log, file, search, repo-discovery, web, and git diff output out of your LLM context. Eleven tools, zero dependencies, works in MCP-compatible clients such as Pi, OpenCode, Claude Code, and KiloCode.
 
 ## Tools
 
@@ -8,20 +8,15 @@ A minimal MCP server that keeps large command, log, file, search, repo-discovery
 |---|---|---|
 | `context_run` | Running shell commands when full stdout is not needed | `bash`, terminal, `tail -10000 log.txt` |
 | `context_logs` | Extracting relevant errors from tests, builds, lints, and logs | raw test/build output, full server logs |
-| `context_read` | Reading local UTF-8 text files safely | `cat huge.log`, `type huge.log`, `Get-Content huge.log` |
-| `context_read_many` | Reading several known files in one bounded response | repeated `context_read` calls |
-| `context_search` | Searching local files with bounded ripgrep output | raw `rg` / `grep` commands |
+| `context_read` | Reading one or more local UTF-8 text files safely | `cat huge.log`, `type huge.log`, repeated file reads |
+| `context_search` | Searching local files with bounded ripgrep output and optional context | raw `rg` / `grep` commands |
 | `context_files` | Listing tracked project files compactly | broad recursive globs, `find .` |
 | `context_tree` | Viewing a bounded directory tree | full recursive tree output |
 | `context_repo_summary` | Getting package/README/config overview | several separate file reads |
 | `context_file_outline` | Seeing imports/exports/functions/classes | reading large source files fully |
-| `context_test_summary` | Running tests/checks with extracted failures | raw test/build output |
-| `context_changed_files` | Seeing compact changed-file status | separate `git status` / name-only calls |
-| `context_grep_context` | Searching with small surrounding context | search followed by multiple reads |
 | `context_fetch` | Fetching web pages as readable text | `webfetch`, raw HTML downloads |
-| `context_diff` | Reviewing compact Git diffs | raw `git diff` output |
-| `context_stats` | Viewing current-project aggregate savings stats | manual accounting |
-| `context_usage_report` | Finding candidates for future tools from local usage metadata | guessing from project trees alone |
+| `context_diff` | Reviewing compact Git diffs or changed-file status | raw `git diff` / `git status` output |
+| `context_usage` | Viewing savings stats or local usage reports | manual accounting, guessing from project trees alone |
 
 ### `context_run`
 
@@ -58,7 +53,7 @@ Unlike `context_run`, non-zero exits return a normal tool response with `exitCod
 
 ### `context_read`
 
-Reads a local UTF-8 text file and returns a safe preview. Output is automatically truncated when it exceeds 60 lines or 32 KB. Override with `maxLines` or `maxBytes` per call.
+Reads local UTF-8 text files and returns safe previews. Use `path` for one file or `paths` for up to 20 files. Output is automatically truncated when it exceeds 60 lines or 32 KB. Override with `maxLines` or `maxBytes` per call.
 
 ```json
 { "path": "logs/app.log", "maxLines": 100, "maxBytes": 16384 }
@@ -73,23 +68,21 @@ Read a specific 1-based line range after a search result:
 File reads are capped at 10 MB by default before formatting. Override with `SIMPLE_CONTEXT_LIMITER_MAX_READ_BYTES` if needed.
 When `fromLine` or `toLine` is used, the file is streamed line-by-line and `maxLines` still caps the returned range.
 
-### `context_read_many`
-
-Reads multiple local UTF-8 text files and returns one bounded response with a header before each file. Use it when discovery already identified a small set of files and several `context_read` calls would otherwise be needed.
+Read multiple known files in one bounded response:
 
 ```json
 { "paths": ["src/a.js", "src/b.js"], "maxLinesPerFile": 80, "maxBytesPerFile": 12000, "maxTotalBytes": 24000 }
 ```
 
-The tool accepts at most 20 paths. Each file uses the same preview behavior as `context_read`, then the combined response is capped by `maxTotalBytes`.
+The tool accepts at most 20 paths. Each file uses the same preview behavior as single-file reads, then the combined response is capped by `maxTotalBytes`.
 
 ### `context_search`
 
-Searches local files with ripgrep and returns bounded `file:line:match` output. Override with `maxMatches`, `maxLines`, or `maxBytes` per call.
+Searches local files with ripgrep and returns bounded `file:line:match` output. Pass `contextLines` when you need small surrounding context windows. Override with `maxMatches`, `maxLines`, or `maxBytes` per call.
 Relative search paths are resolved from the MCP server's `process.cwd()`.
 
 ```json
-{ "pattern": "ERROR", "path": "logs", "include": "*.log", "maxMatches": 100, "maxBytes": 16384 }
+{ "pattern": "ERROR", "path": "logs", "include": "*.log", "contextLines": 2, "maxMatches": 100, "maxBytes": 16384 }
 ```
 
 simple-context-limiter does not download ripgrep. It uses the first available binary from:
@@ -109,19 +102,18 @@ Use these before broad file reads or recursive shell commands:
 - `context_tree` shows a bounded tree and skips heavy folders like `.git` and `node_modules`.
 - `context_repo_summary` summarizes package metadata, scripts, configs, README preview, and tracked-file count.
 - `context_file_outline` extracts imports, exports, functions, classes, and top-level declarations from one source file.
-- `context_changed_files` shows compact Git porcelain status.
-- `context_grep_context` searches with bounded context windows around matches.
+- `context_search` searches with bounded context windows when `contextLines` is set.
 
-Use `context_test_summary` for test/check commands when you want error blocks or a compact tail fallback instead of full output.
+Use `context_logs` for test/check commands when you want error blocks or a compact tail fallback instead of full output.
 
 ### Usage Reports
 
 simple-context-limiter records local usage metadata by default in `~/.simple-context-limiter/usage.jsonl`. It does not store tool outputs and does not upload anything. For shell commands, it stores a command class such as `git-history`, `dependencies`, or `infra-logs`, not the raw command string.
 
-Use `context_usage_report` to see which existing tools save the most context and which new tools may be worth adding:
+Use `context_usage` to see aggregate savings stats or which new tools may be worth adding from local usage patterns:
 
 ```json
-{ "maxEvents": 1000, "maxLines": 100 }
+{ "mode": "report", "maxEvents": 1000, "maxLines": 100 }
 ```
 
 Opt out by setting `SIMPLE_CONTEXT_LIMITER_USAGE_LOG=0` or `SIMPLE_CONTEXT_LIMITER_DISABLE_USAGE_LOG=1` in the MCP server environment.
@@ -155,9 +147,15 @@ Review staged changes instead:
 `context_diff` only reports tracked working-tree or staged changes covered by `git diff`. It does not include untracked files unless they have been staged.
 Relative diff paths are resolved from the MCP server's `process.cwd()`.
 
-### `context_stats`
+Show compact changed-file status instead of diff hunks:
 
-Shows aggregate savings statistics for the current project, grouped by tool. The project key is the MCP server's `process.cwd()`.
+```json
+{ "mode": "status", "maxBytes": 16384 }
+```
+
+### `context_usage`
+
+Shows aggregate savings statistics for the current project by default. Use `mode: "report"` for local usage telemetry and tool recommendations. The project key is the MCP server's `process.cwd()`.
 
 ```json
 {}
@@ -190,15 +188,11 @@ The server also injects MCP startup instructions telling the LLM to default to t
 - `context_run` instead of shell/terminal commands that may produce large output
 - `context_logs` instead of plain command output for tests, builds, lints, server logs, and other error-heavy output
 - `context_read` instead of `cat`, `type`, or `Get-Content` for file previews
-- `context_read_many` instead of several `context_read` calls for a small known file set
 - `context_search` instead of raw `rg` or `grep` commands for bounded search results
 - `context_files`, `context_tree`, `context_repo_summary`, and `context_file_outline` before broad file reads
-- `context_test_summary` instead of raw test/check output
-- `context_changed_files` instead of separate Git status/name-only commands
-- `context_grep_context` instead of search plus several file reads
 - `context_fetch` instead of raw web fetches for pages that are not needed as raw HTML
 - `context_diff` instead of raw `git diff` for compact working-tree or staged diff previews
-- `context_stats` when you want to inspect accumulated current-project savings
+- `context_usage` when you want to inspect accumulated current-project savings or usage reports
 
 Native shell, read, fetch, or diff tools remain appropriate when complete output, exact stderr/exit behavior, interactivity, or unsupported behavior is specifically needed. If `_meta.truncated` is true, retry with a narrower query/range or higher `maxLines`/`maxBytes` before falling back to native tools.
 
@@ -323,13 +317,13 @@ For Pi:
 
 ## Security / Trust Model
 
-simple-context-limiter intentionally gives trusted agents local capabilities: `context_run` executes shell commands, `context_read`, `context_read_many`, and `context_search` can access local paths visible to the MCP server process, and `context_fetch` can reach HTTP services available from that machine. Only enable it for clients and agents you trust with that access. Output, downloads, and previews are size-limited to protect model context, not to sandbox the underlying operation.
+simple-context-limiter intentionally gives trusted agents local capabilities: `context_run` executes shell commands, `context_read` and `context_search` can access local paths visible to the MCP server process, and `context_fetch` can reach HTTP services available from that machine. Only enable it for clients and agents you trust with that access. Output, downloads, and previews are size-limited to protect model context, not to sandbox the underlying operation.
 
 ## Cache
 
 `context_fetch` caches fetched content for 1 hour in `~/.simple-context-limiter/cache.json` and prunes old entries on load/save. The cache is capped by entry count and total content bytes. Delete that file anytime to clear the cache.
 
-`context_usage_report` reads `~/.simple-context-limiter/usage.jsonl`. Delete that file anytime to clear collected usage metadata.
+`context_usage` with `mode: "report"` reads `~/.simple-context-limiter/usage.jsonl`. Delete that file anytime to clear collected usage metadata.
 
 ## Why So Minimal?
 
