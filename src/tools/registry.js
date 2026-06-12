@@ -139,6 +139,7 @@ export const tools = {
             description: "For paths: max bytes for the combined response. Default: 32768.",
           },
         },
+        anyOf: [{ required: ["path"] }, { required: ["paths"] }],
       },
     },
     {

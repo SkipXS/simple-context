@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { usageLogEnabled, USAGE_LOG_FILE } from "./constants.js";
+import { usageLogEnabled, USAGE_LOG_FILE, USAGE_LOG_MAX_BYTES } from "./constants.js";
 
 const MAX_REPORT_EVENTS = 10_000;
 const REPORT_READ_BYTES = 5 * 1024 * 1024;
@@ -28,9 +28,30 @@ export async function recordUsage(toolName, args, result, error, durationMs) {
   try {
     await fs.promises.mkdir(path.dirname(USAGE_LOG_FILE), { recursive: true });
     await fs.promises.appendFile(USAGE_LOG_FILE, `${JSON.stringify(event)}\n`, "utf8");
+    await pruneUsageLogIfNeeded();
   } catch {
     // Usage logging must never affect tool behavior.
   }
+}
+
+async function pruneUsageLogIfNeeded() {
+  const stat = await fs.promises.stat(USAGE_LOG_FILE);
+  if (stat.size <= USAGE_LOG_MAX_BYTES) return;
+
+  const keepBytes = Math.max(1024, USAGE_LOG_MAX_BYTES);
+  const file = await fs.promises.open(USAGE_LOG_FILE, "r");
+  let text;
+  try {
+    const buffer = Buffer.alloc(Math.min(keepBytes, stat.size));
+    await file.read(buffer, 0, buffer.length, stat.size - buffer.length);
+    text = buffer.toString("utf8");
+  } finally {
+    await file.close();
+  }
+
+  const firstNewline = text.indexOf("\n");
+  if (firstNewline !== -1 && firstNewline < text.length - 1) text = text.slice(firstNewline + 1);
+  await fs.promises.writeFile(USAGE_LOG_FILE, text, "utf8");
 }
 
 export async function usageReport({ maxEvents = 1000 } = {}) {

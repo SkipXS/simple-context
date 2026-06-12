@@ -240,6 +240,14 @@ try {
   assert.equal(invalidMissingMethod.error.code, -32600);
   assert.match(invalidMissingMethod.error.message, /Invalid Request/);
 
+  const invalidJsonRpcVersion = await rawRequest({ jsonrpc: "1.0", id: "bad-version", method: "tools/list" });
+  assert.equal(invalidJsonRpcVersion.id, "bad-version");
+  assert.equal(invalidJsonRpcVersion.error.code, -32600);
+
+  const invalidRequestId = await rawRequest({ jsonrpc: "2.0", id: { bad: true }, method: "tools/list" });
+  assert.equal(invalidRequestId.id, null);
+  assert.equal(invalidRequestId.error.code, -32600);
+
   const emptyBatch = await rawRequest([]);
   assert.equal(emptyBatch.id, null);
   assert.equal(emptyBatch.error.code, -32600);
@@ -268,6 +276,8 @@ try {
     "context_usage",
   ]);
   assert.equal(listed.result.tools.every((tool) => tool.inputSchema.additionalProperties === false), true);
+  const readSchema = listed.result.tools.find((tool) => tool.name === "context_read").inputSchema;
+  assert.deepEqual(readSchema.anyOf, [{ required: ["path"] }, { required: ["paths"] }]);
 
   const unknownTool = await request("tools/call", {
     name: "context_missing",
@@ -275,6 +285,14 @@ try {
   });
   assert.equal(unknownTool.error.code, -32601);
   assert.match(unknownTool.error.message, /Unknown tool/);
+
+  const missingToolName = await request("tools/call", { arguments: {} });
+  assert.equal(missingToolName.error.code, -32602);
+  assert.match(missingToolName.error.message, /params\.name/);
+
+  const invalidToolArguments = await request("tools/call", { name: "context_usage", arguments: [] });
+  assert.equal(invalidToolArguments.error.code, -32602);
+  assert.match(invalidToolArguments.error.message, /params\.arguments/);
 
   const files = await request("tools/call", {
     name: "context_discover",
@@ -1174,6 +1192,29 @@ try {
   assert.equal(usagePayload.meta.loggingEnabled, true);
   assert.equal(usagePayload.meta.byCommandKind.some((entry) => entry.name === "git-history"), true);
   assert.equal(usagePayload.usageLog.includes("git log --oneline"), false);
+
+  const usagePruneRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
+    import { stat } from 'node:fs/promises';
+    import { join } from 'node:path';
+    const { callTool } = await import('./src/tools.js');
+    const command = ${JSON.stringify(isPowerShellConfigured() ? `& ${shellQuote(process.execPath)} -e "console.log('ok')"` : `${shellQuote(process.execPath)} -e "console.log('ok')"`)};
+    for (let i = 0; i < 40; i++) await callTool('context_run', { command });
+    const file = join(process.env.HOME, '.simple-context-limiter', 'usage.jsonl');
+    const fileStat = await stat(file);
+    console.log(JSON.stringify({ size: fileStat.size }));
+  `], {
+    cwd: import.meta.dirname,
+    timeout: 10_000,
+    env: {
+      ...process.env,
+      HOME: join(tempDir, "usage-prune-home"),
+      USERPROFILE: join(tempDir, "usage-prune-home"),
+      SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "1",
+      SIMPLE_CONTEXT_LIMITER_USAGE_LOG_MAX_BYTES: "2048",
+    },
+  });
+  assert.equal(usagePruneRun.code, 0, usagePruneRun.stderr);
+  assert.ok(JSON.parse(usagePruneRun.stdout.trim()).size <= 2048);
 
   const usageOptOutRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
     import { readFile } from 'node:fs/promises';

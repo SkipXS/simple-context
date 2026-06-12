@@ -16,6 +16,7 @@ export const MAX_READ_BYTES = normalizeByteLimit(process.env.SIMPLE_CONTEXT_LIMI
 export const READ_RANGE_TIMEOUT_MS = normalizeIntegerLimit(process.env.SIMPLE_CONTEXT_LIMITER_READ_RANGE_TIMEOUT_MS, 120_000, 1_000, 3_600_000);
 export const CACHE_MAX_ENTRIES = normalizeIntegerLimit(process.env.SIMPLE_CONTEXT_LIMITER_CACHE_MAX_ENTRIES, 200, 1, 10_000);
 export const CACHE_MAX_BYTES = normalizeByteLimit(process.env.SIMPLE_CONTEXT_LIMITER_CACHE_MAX_BYTES, 50 * 1024 * 1024);
+export const USAGE_LOG_MAX_BYTES = normalizeByteLimit(process.env.SIMPLE_CONTEXT_LIMITER_USAGE_LOG_MAX_BYTES, 10 * 1024 * 1024);
 export const CACHE_TTL_MS = 3_600_000;
 export const ALLOW_NON_HTTP_FETCH = /^(1|true|yes)$/i.test(process.env.SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH ?? "");
 

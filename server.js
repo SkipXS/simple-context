@@ -52,8 +52,32 @@ function isRequestObject(message) {
   return message !== null && typeof message === "object" && !Array.isArray(message);
 }
 
+function isValidRequestId(id) {
+  return id === null || typeof id === "string" || (typeof id === "number" && Number.isFinite(id));
+}
+
 function hasRequestId(message) {
   return Object.prototype.hasOwnProperty.call(message, "id");
+}
+
+function invalidParams(message) {
+  const error = new Error(message);
+  error.code = -32602;
+  throw error;
+}
+
+function validateToolCallParams(params) {
+  if (!isRequestObject(params)) invalidParams("tools/call params must be an object");
+
+  const { name, arguments: args } = params;
+  if (typeof name !== "string" || name.trim() === "") {
+    invalidParams("tools/call params.name must be a non-empty string");
+  }
+  if (args !== undefined && !isRequestObject(args)) {
+    invalidParams("tools/call params.arguments must be an object when provided");
+  }
+
+  return { name, args };
 }
 
 function rpcCode(error) {
@@ -80,6 +104,8 @@ async function handleMessage(msg) {
 
   const hasId = hasRequestId(msg);
   const { id, method, params } = msg;
+  if (hasId && !isValidRequestId(id)) return errorResponse(null, -32600, "Invalid Request");
+  if (msg.jsonrpc !== "2.0") return errorResponse(hasId ? id : null, -32600, "Invalid Request");
   if (typeof method !== "string") return errorResponse(hasId ? id : null, -32600, "Invalid Request");
 
   try {
@@ -101,7 +127,7 @@ async function handleMessage(msg) {
     }
 
     if (method === "tools/call") {
-      const { name, arguments: args } = params ?? {};
+      const { name, args } = validateToolCallParams(params);
       const result = await callTool(name, args);
       if (!hasId) return undefined;
       return resultResponse(id, result);
