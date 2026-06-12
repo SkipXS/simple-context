@@ -125,6 +125,17 @@ function assertSavingsMeta(meta) {
   assert.ok(meta.estimatedTokensSaved >= 0);
 }
 
+function findSchemaKeyword(value, banned, path = "inputSchema") {
+  if (value === null || typeof value !== "object") return undefined;
+  for (const key of Object.keys(value)) {
+    const currentPath = `${path}.${key}`;
+    if (banned.includes(key)) return currentPath;
+    const nested = findSchemaKeyword(value[key], banned, currentPath);
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
 async function pathExists(filePath) {
   try {
     await import("node:fs/promises").then((fs) => fs.stat(filePath));
@@ -203,16 +214,24 @@ try {
   const largeFile = join(tempDir, "large.txt");
   const largeOneLineFile = join(tempDir, "large-one-line.txt");
   const manyShortLinesFile = join(tempDir, "many-short-lines.txt");
+  const manyByteLinesFile = join(tempDir, "many-byte-lines.txt");
   const hugeRangeFile = join(tempDir, "huge-range.txt");
   const dashFile = join(tempDir, "dash.txt");
   await writeFile(largeFile, Array.from({ length: 300 }, (_, i) => `file line ${i}`).join("\n"), "utf8");
   await writeFile(largeOneLineFile, "🙂".repeat(2048), "utf8");
   await writeFile(manyShortLinesFile, Array.from({ length: 300 }, () => "x").join("\n"), "utf8");
+  await writeFile(manyByteLinesFile, Array.from({ length: 500 }, () => "xxxx").join("\n"), "utf8");
   await writeFile(hugeRangeFile, `${"x".repeat(4096)}\nsmall\n`, "utf8");
   await writeFile(dashFile, "-needle\nplain\n", "utf8");
 
   const init = await request("initialize", {});
   assert.equal(init.result.serverInfo.name, "simple-context-limiter");
+  const invalidInitializeParams = await request("initialize", []);
+  assert.equal(invalidInitializeParams.error.code, -32602);
+  assert.match(invalidInitializeParams.error.message, /initialize params/);
+  const invalidInitializeProtocol = await request("initialize", { protocolVersion: 123 });
+  assert.equal(invalidInitializeProtocol.error.code, -32602);
+  assert.match(invalidInitializeProtocol.error.message, /protocolVersion/);
   const packageJson = JSON.parse(await readFile(join(import.meta.dirname, "package.json"), "utf8"));
   assert.equal(SERVER_VERSION, packageJson.version);
   assert.equal(init.result.serverInfo.version, packageJson.version);
@@ -276,6 +295,7 @@ try {
     "context_usage",
   ]);
   assert.equal(listed.result.tools.every((tool) => tool.inputSchema.additionalProperties === false), true);
+  assert.equal(findSchemaKeyword(listed.result.tools.map((tool) => tool.inputSchema), ["oneOf", "anyOf", "allOf", "enum", "const", "not"]), undefined);
   const readSchema = listed.result.tools.find((tool) => tool.name === "context_read").inputSchema;
   assert.equal(readSchema.type, "object");
   assert.equal(readSchema.anyOf, undefined);
@@ -641,10 +661,18 @@ try {
 
   const invalidReadManyRange = await request("tools/call", {
     name: "context_read",
-    arguments: { paths: [largeFile], fromLine: 1 },
+    arguments: { paths: [largeFile, dashFile], fromLine: 1 },
   });
   assert.equal(invalidReadManyRange.error.code, -32602);
-  assert.match(invalidReadManyRange.error.message, /single path/);
+  assert.match(invalidReadManyRange.error.message, /require path/);
+
+  const singlePathArrayRange = await request("tools/call", {
+    name: "context_read",
+    arguments: { paths: [largeFile], fromLine: 291, toLine: 295, maxLinesPerFile: 20 },
+  });
+  assert.ok(singlePathArrayRange.result, JSON.stringify(singlePathArrayRange));
+  assert.match(singlePathArrayRange.result.content[0].text, /file line 290/);
+  assert.doesNotMatch(singlePathArrayRange.result.content[0].text, /file line 289/);
 
   const mergedReadPathAndPaths = await request("tools/call", {
     name: "context_read",
@@ -654,6 +682,17 @@ try {
   assert.equal(mergedReadPathAndPaths.result._meta.filesRead, 2);
   assert.match(mergedReadPathAndPaths.result.content[0].text, /large\.txt/);
   assert.match(mergedReadPathAndPaths.result.content[0].text, /dash\.txt/);
+
+  const rangedMergedRead = await request("tools/call", {
+    name: "context_read",
+    arguments: { path: largeFile, paths: [dashFile], fromLine: 291, toLine: 295, maxLinesPerFile: 20, maxTotalBytes: 4096 },
+  });
+  assert.ok(rangedMergedRead.result, JSON.stringify(rangedMergedRead));
+  assert.match(rangedMergedRead.result.content[0].text, /large\.txt/);
+  assert.match(rangedMergedRead.result.content[0].text, /file line 290/);
+  assert.doesNotMatch(rangedMergedRead.result.content[0].text, /file line 289/);
+  assert.match(rangedMergedRead.result.content[0].text, /dash\.txt/);
+  assert.match(rangedMergedRead.result.content[0].text, /-needle/);
 
   const invalidReadManyPaths = await request("tools/call", {
     name: "context_read",
@@ -709,6 +748,15 @@ try {
   assert.equal(byteLimitedRangeRead.result._meta.returnedLines, 1);
   assert.ok(byteLimitedRangeRead.result._meta.savedBytes > 0);
   assert.match(byteLimitedRangeRead.result.content[0].text, /^x+/);
+
+  const newlineLimitedRangeRead = await request("tools/call", {
+    name: "context_read",
+    arguments: { path: manyByteLinesFile, fromLine: 1, toLine: 500, maxLines: 500 },
+  });
+  assert.equal(newlineLimitedRangeRead.result._meta.truncated, true);
+  assert.equal(newlineLimitedRangeRead.result._meta.fileReadLimited, true);
+  assert.ok(newlineLimitedRangeRead.result._meta.returnedBytes <= 2048);
+  assert.ok(Buffer.byteLength(newlineLimitedRangeRead.result.content[0].text, "utf8") <= 2048);
 
   const invalidRangeRead = await request("tools/call", {
     name: "context_read",

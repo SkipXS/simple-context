@@ -90,13 +90,13 @@ export const tools = {
       inputSchema: {
         type: "object",
         properties: {
-          path: { type: "string", description: "Single file path to read." },
+          path: { type: "string", description: "Single file path to read. Use this, not paths, for fromLine/toLine range reads. If paths is also provided with a range, the range applies only to this path." },
           paths: {
             type: "array",
             minItems: 1,
             maxItems: 20,
             items: { type: "string" },
-            description: "Multiple file paths to read. Maximum 20. If path is also provided, it is prepended and duplicates are ignored.",
+            description: "Multiple file paths to read. Maximum 20. If path is also provided, it is prepended and duplicates are ignored. For range reads, prefer path with fromLine/toLine; paths may add extra non-ranged files.",
           },
           maxLines: {
             type: "integer",
@@ -113,12 +113,12 @@ export const tools = {
           fromLine: {
             type: "integer",
             minimum: 1,
-            description: "First 1-based line to read. Optional. Single path only.",
+            description: "First 1-based line to read. Optional. Use with path. Do not use with multiple paths unless path identifies the one ranged file.",
           },
           toLine: {
             type: "integer",
             minimum: 1,
-            description: "Last 1-based line to read. Optional. Single path only.",
+            description: "Last 1-based line to read. Optional. Use with path. Do not use with multiple paths unless path identifies the one ranged file.",
           },
           maxLinesPerFile: {
             type: "integer",
@@ -154,7 +154,7 @@ export const tools = {
       inputSchema: {
         type: "object",
         properties: {
-          engine: { type: "string", enum: ["text", "ast"], description: "Search engine. Default: text. Use ast for ast-grep structural patterns." },
+          engine: { type: "string", description: "Search engine. Allowed values: text, ast. Default: text. Use ast for ast-grep structural patterns." },
           pattern: { type: "string", description: "Regex pattern to search for" },
           path: { type: "string", description: "File or directory to search. Default: ." },
           include: { type: "string", description: "File glob to include, for example *.js or *.{ts,tsx}" },
@@ -189,7 +189,7 @@ export const tools = {
       inputSchema: {
         type: "object",
         properties: {
-          mode: { type: "string", enum: ["summary", "files", "tree", "outline"], description: "Discovery mode. Default: summary." },
+          mode: { type: "string", description: "Discovery mode. Allowed values: summary, files, tree, outline. Default: summary." },
           path: { type: "string", description: "File or directory path to list. Default: . For mode=outline, this must be a single source file." },
           include: { type: "string", description: "Optional JavaScript regular expression used to filter returned file paths." },
           maxFiles: { type: "integer", minimum: 1, maximum: 5000, description: "Maximum files to show. Default: 500." },
@@ -234,7 +234,7 @@ export const tools = {
         type: "object",
         properties: {
           path: { type: "string", description: "Optional file or directory pathspec to diff. Blank values are treated as omitted." },
-          mode: { type: "string", enum: ["diff", "status"], description: "Return diff hunks or compact changed-file status. Default: diff." },
+          mode: { type: "string", description: "Return diff hunks or compact changed-file status. Allowed values: diff, status. Default: diff." },
           staged: { type: "boolean", description: "Show staged changes with git diff --cached. Default: false." },
           stat: { type: "boolean", description: "Include git diff --stat before hunks. Default: true." },
           maxFiles: {
@@ -271,7 +271,7 @@ export const tools = {
       inputSchema: {
         type: "object",
         properties: {
-          mode: { type: "string", enum: ["stats", "report"], description: "Report type. Default: stats." },
+          mode: { type: "string", description: "Report type. Allowed values: stats, report. Default: stats." },
           maxEvents: { type: "integer", minimum: 1, maximum: 10000, description: "Maximum recent usage events to analyze. Default: 1000." },
           maxLines: { type: "integer", minimum: 10, maximum: 200, description: "Max lines before truncation. Default: 60." },
           maxBytes: { type: "integer", minimum: 1024, maximum: MAX_BYTES, description: "Max output bytes before truncation. Default: 32768." },

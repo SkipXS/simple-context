@@ -6,20 +6,29 @@ import { formatOutput } from "./output.js";
 function terminateChild(child) {
   if (!child.pid) {
     child.kill();
-    return;
+    return Promise.resolve();
   }
 
   if (process.platform === "win32") {
-    const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true,
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => done(true), 1_000);
+      timer.unref();
+      const done = (fallback) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (fallback) child.kill();
+        resolve();
+      };
+      const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      killer.on("error", () => done(true));
+      killer.on("close", (code) => done(code !== 0));
+      killer.unref();
     });
-    killer.on("error", () => child.kill());
-    killer.on("close", (code) => {
-      if (code !== 0) child.kill();
-    });
-    killer.unref();
-    return;
   }
 
   try {
@@ -36,6 +45,7 @@ function terminateChild(child) {
     }
   }, 1_000);
   force.unref();
+  return Promise.resolve();
 }
 
 export function commandErrorData(error) {

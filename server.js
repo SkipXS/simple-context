@@ -5,6 +5,8 @@ import { SERVER_NAME, SERVER_VERSION } from "./src/constants.js";
 import { tools, callTool } from "./src/tools.js";
 import { commandErrorData, errorData } from "./src/process.js";
 
+const PROTOCOL_VERSION = "2024-11-05";
+
 function handleStdoutError(error) {
   if (error?.code === "EPIPE" || error?.code === "ERR_STREAM_DESTROYED") process.exit(0);
   throw error;
@@ -80,6 +82,14 @@ function validateToolCallParams(params) {
   return { name, args };
 }
 
+function validateInitializeParams(params) {
+  if (params === undefined) return;
+  if (!isRequestObject(params)) invalidParams("initialize params must be an object when provided");
+  if (params.protocolVersion !== undefined && typeof params.protocolVersion !== "string") {
+    invalidParams("initialize params.protocolVersion must be a string when provided");
+  }
+}
+
 function rpcCode(error) {
   return Number.isInteger(error.code) ? error.code : -32000;
 }
@@ -110,9 +120,10 @@ async function handleMessage(msg) {
 
   try {
     if (method === "initialize") {
+      validateInitializeParams(params);
       if (!hasId) return undefined;
       return resultResponse(id, {
-        protocolVersion: "2024-11-05",
+        protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {} },
         serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
         instructions,

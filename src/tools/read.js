@@ -38,6 +38,7 @@ function normalizeReadPaths(args) {
 
 export async function readManyTool(args, toolName = "context_read") {
   const {
+    path: primaryPath,
     paths,
     maxLines,
     maxBytes,
@@ -54,8 +55,15 @@ export async function readManyTool(args, toolName = "context_read") {
   if (paths.length > 20) {
     invalidParams(`${toolName} paths must contain at most 20 files`);
   }
-  if (fromLine !== undefined || toLine !== undefined) {
-    invalidParams(`${toolName} fromLine and toLine are only supported with a single path`);
+  const rangeMode = fromLine !== undefined || toLine !== undefined;
+  let rangePath;
+  if (rangeMode) {
+    if (typeof primaryPath === "string" && primaryPath.trim() !== "") rangePath = primaryPath;
+    else if (paths.length === 1) rangePath = paths[0];
+    else {
+      invalidParams(`${toolName} range reads with multiple files require path to identify the ranged file; use path with fromLine/toLine and paths for additional files`);
+    }
+    normalizeLineRange(fromLine, toLine);
   }
 
   const lineLimit = validateInteger(maxLinesPerFile, `${toolName} maxLinesPerFile`, 10, 500);
@@ -68,7 +76,12 @@ export async function readManyTool(args, toolName = "context_read") {
     if (typeof filePath !== "string" || filePath.trim() === "") {
       invalidParams(`${toolName} paths must contain non-empty strings`);
     }
-    results.push(await readFilePreview({ path: filePath, maxLines: lineLimit, maxBytes: byteLimit }, toolName));
+    const previewArgs = { path: filePath, maxLines: lineLimit, maxBytes: byteLimit };
+    if (filePath === rangePath) {
+      previewArgs.fromLine = fromLine;
+      previewArgs.toLine = toLine;
+    }
+    results.push(await readFilePreview(previewArgs, toolName));
   }
 
   const combined = results
@@ -200,14 +213,15 @@ async function readLineRange(filePath, fromLine, toLine, maxLines, maxBytes, tim
     }
 
     const nextLine = currentLine + text;
-    if (bytes + Buffer.byteLength(nextLine, "utf8") > maxBytes) {
+    const separatorBytes = lines.length > 0 ? 1 : 0;
+    if (bytes + separatorBytes + Buffer.byteLength(nextLine, "utf8") > maxBytes) {
       limited = true;
-      const remaining = maxBytes - bytes;
+      const remaining = maxBytes - bytes - separatorBytes;
       if (remaining > 0) {
         const clipped = decodeUtf8(Buffer.from(nextLine, "utf8").subarray(0, remaining), { trimEnd: true });
         if (clipped) {
           lines.push(clipped);
-          bytes += Buffer.byteLength(clipped, "utf8");
+          bytes += separatorBytes + Buffer.byteLength(clipped, "utf8");
           lineNumber++;
         }
       }
@@ -227,8 +241,15 @@ async function readLineRange(filePath, fromLine, toLine, maxLines, maxBytes, tim
     if (lineNumber < fromLine) return true;
     if (lineNumber > toLine) return false;
 
+    const separatorBytes = lines.length > 0 ? 1 : 0;
+    const nextBytes = separatorBytes + Buffer.byteLength(line, "utf8");
+    if (bytes + nextBytes > maxBytes) {
+      limited = true;
+      return false;
+    }
+
     lines.push(line);
-    bytes += Buffer.byteLength(line, "utf8");
+    bytes += nextBytes;
 
     if (lines.length >= maxLines && lineNumber < toLine) {
       rangeLimited = true;
