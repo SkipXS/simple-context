@@ -81,28 +81,28 @@ export async function searchTool(args) {
   } = args ?? {};
 
   if (engine !== "text" && engine !== "ast") {
-    invalidParams("context_search engine must be \"text\" or \"ast\"");
+    invalidParams("search engine must be \"text\" or \"ast\"");
   }
   if (typeof pattern !== "string" || pattern.trim() === "") {
-    invalidParams("context_search requires a non-empty pattern string");
+    invalidParams("search requires a non-empty pattern string");
   }
   if (typeof searchPath !== "string" || searchPath.trim() === "") {
-    invalidParams("context_search requires path to be a non-empty string when provided");
+    invalidParams("search requires path to be a non-empty string when provided");
   }
   if (include !== undefined && typeof include !== "string") {
-    invalidParams("context_search include must be a string when provided");
+    invalidParams("search include must be a string when provided");
   }
   if (language !== undefined && typeof language !== "string") {
-    invalidParams("context_search language must be a string when provided");
+    invalidParams("search language must be a string when provided");
   }
-  const contextLimit = validateInteger(contextLines, "context_search contextLines", 0, 10);
-  const limit = validateInteger(maxMatches, "context_search maxMatches", 1, 1000);
-  const lineLimit = validateInteger(maxLines, "context_search maxLines", 10, 200);
-  const byteLimit = validateInteger(maxBytes, "context_search maxBytes", 1024, MAX_BYTES);
+  const contextLimit = validateInteger(contextLines, "search contextLines", 0, 10);
+  const limit = validateInteger(maxMatches, "search maxMatches", 1, 1000);
+  const lineLimit = validateInteger(maxLines, "search maxLines", 10, 200);
+  const byteLimit = validateInteger(maxBytes, "search maxBytes", 1024, MAX_BYTES);
 
   if (engine === "ast") {
     if (typeof language !== "string" || language.trim() === "") {
-      invalidParams("context_search language is required when engine is ast");
+      invalidParams("search language is required when engine is ast");
     }
     return await astSearchTool(pattern, searchPath, include, language, contextLimit, limit, lineLimit, byteLimit);
   }
@@ -146,7 +146,7 @@ export async function searchTool(args) {
       truncated: false,
       durationMs: result.durationMs,
     };
-    await recordStats("context_search", meta);
+    await recordStats("search", meta);
 
     return {
       content: [{ type: "text", text }],
@@ -178,7 +178,7 @@ export async function searchTool(args) {
     truncated: matchLimited || formatted.truncated,
     durationMs: result.durationMs,
   };
-  await recordStats("context_search", meta);
+  await recordStats("search", meta);
 
   return {
     content: [{ type: "text", text: formatted.text }],
@@ -234,7 +234,7 @@ async function astSearchTool(pattern, searchPath, include, language, contextLine
     truncated: matchLimited || formatted.truncated,
     durationMs: Date.now() - started,
   };
-  await recordStats("context_search", meta);
+  await recordStats("search", meta);
 
   return { content: [{ type: "text", text: formatted.text }], _meta: meta };
 }
@@ -295,7 +295,7 @@ async function searchWithContext(rg, pattern, searchPath, include, contextLines,
     truncated: result.truncated || result.outputTooLarge || formatted.truncated,
     durationMs: Date.now() - started,
   };
-  await recordStats("context_search", meta);
+  await recordStats("search", meta);
 
   return { content: [{ type: "text", text: formatted.text }], _meta: meta };
 }
@@ -316,7 +316,7 @@ async function noMatches(rg, durationMs, contextLines) {
     truncated: false,
     durationMs,
   };
-  await recordStats("context_search", meta);
+  await recordStats("search", meta);
 
   return { content: [{ type: "text", text }], _meta: meta };
 }

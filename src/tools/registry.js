@@ -12,7 +12,7 @@ import { recordUsage } from "../usage.js";
 export const tools = {
   tools: [
     {
-      name: "context_run",
+      name: "run",
       description:
         "Run a shell command and return only stdout. Large output is automatically truncated to head+tail (default 60 lines). Use this instead of bash when you don't need every line of output.",
       inputSchema: {
@@ -42,7 +42,7 @@ export const tools = {
       },
     },
     {
-      name: "context_logs",
+      name: "logs",
       description:
         "Run a shell command and extract relevant log/error blocks instead of returning plain head+tail output. Non-zero exits return normal tool results with exit metadata.",
       inputSchema: {
@@ -84,7 +84,7 @@ export const tools = {
       },
     },
     {
-      name: "context_read",
+      name: "read",
       description:
         "Read one or more local UTF-8 text files and return bounded previews. Use path for one file or paths for up to 20 files.",
       inputSchema: {
@@ -148,7 +148,7 @@ export const tools = {
       },
     },
     {
-      name: "context_search",
+      name: "search",
       description:
         "Search local files with bounded text or optional ast-grep structural search results.",
       inputSchema: {
@@ -183,7 +183,7 @@ export const tools = {
       },
     },
     {
-      name: "context_discover",
+      name: "discover",
       description:
         "Discover repository structure and source outlines. Use mode=summary, files, tree, or outline before broad file reads.",
       inputSchema: {
@@ -202,7 +202,7 @@ export const tools = {
       },
     },
     {
-      name: "context_fetch",
+      name: "fetch",
       description:
         "Fetch a URL and return its content as plain text (HTML is stripped to readable text). Large output is automatically truncated to head+tail. Results are cached for 1 hour; use force=true to bypass.",
       inputSchema: {
@@ -227,7 +227,7 @@ export const tools = {
       },
     },
     {
-      name: "context_diff",
+      name: "diff",
       description:
         "Show compact git diffs, changed-file status, or commit history. Use this instead of raw git diff/status/log when reviewing a repo.",
       inputSchema: {
@@ -265,7 +265,7 @@ export const tools = {
       },
     },
     {
-      name: "context_usage",
+      name: "usage",
       description:
         "Show aggregate savings stats, local usage telemetry, or usage guidance. Use mode=stats, mode=report, or mode=guidance.",
       inputSchema: {
@@ -282,14 +282,14 @@ export const tools = {
 };
 
 const handlers = {
-  context_run: runTool,
-  context_logs: logsTool,
-  context_read: readTool,
-  context_search: searchTool,
-  context_discover: discoverTool,
-  context_fetch: fetchTool,
-  context_diff: diffTool,
-  context_usage: usageTool,
+  run: runTool,
+  logs: logsTool,
+  read: readTool,
+  search: searchTool,
+  discover: discoverTool,
+  fetch: fetchTool,
+  diff: diffTool,
+  usage: usageTool,
 };
 
 for (const tool of tools.tools) tool.inputSchema.additionalProperties = false;

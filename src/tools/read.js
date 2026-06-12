@@ -8,11 +8,11 @@ import { invalidParams, validateInteger } from "./shared.js";
 
 export async function readTool(args) {
   if ((args ?? {}).paths !== undefined) {
-    return await readManyTool({ ...args, paths: normalizeReadPaths(args) }, "context_read");
+    return await readManyTool({ ...args, paths: normalizeReadPaths(args) }, "read");
   }
 
-  const result = await readFilePreview(args, "context_read");
-  await recordStats("context_read", result._meta);
+  const result = await readFilePreview(args, "read");
+  await recordStats("read", result._meta);
 
   return result;
 }
@@ -21,13 +21,13 @@ function normalizeReadPaths(args) {
   const merged = [];
   if ((args ?? {}).path !== undefined) merged.push(args.path);
   if (Array.isArray(args.paths)) merged.push(...args.paths);
-  else invalidParams("context_read requires paths to be an array when provided");
+  else invalidParams("read requires paths to be an array when provided");
 
   const paths = [];
   const seen = new Set();
   for (const filePath of merged) {
     if (typeof filePath !== "string" || filePath.trim() === "") {
-      invalidParams("context_read paths must contain non-empty strings");
+      invalidParams("read paths must contain non-empty strings");
     }
     if (seen.has(filePath)) continue;
     seen.add(filePath);
@@ -36,7 +36,7 @@ function normalizeReadPaths(args) {
   return paths;
 }
 
-export async function readManyTool(args, toolName = "context_read") {
+export async function readManyTool(args, toolName = "read") {
   const {
     path: primaryPath,
     paths,
@@ -182,11 +182,11 @@ function savingsForReturnedBytes(totalBytes, returnedBytes) {
 }
 
 function normalizeLineRange(fromLine, toLine) {
-  const from = fromLine === undefined ? 1 : validateInteger(fromLine, "context_read fromLine", 1);
-  const to = toLine === undefined ? Infinity : validateInteger(toLine, "context_read toLine", 1);
+  const from = fromLine === undefined ? 1 : validateInteger(fromLine, "read fromLine", 1);
+  const to = toLine === undefined ? Infinity : validateInteger(toLine, "read toLine", 1);
 
   if (to < from) {
-    invalidParams("context_read toLine must be greater than or equal to fromLine");
+    invalidParams("read toLine must be greater than or equal to fromLine");
   }
 
   return { fromLine: from, toLine: to };
@@ -206,7 +206,7 @@ async function readLineRange(filePath, fromLine, toLine, maxLines, maxBytes, max
   let currentLine = "";
   const timer = setTimeout(() => {
     scanTimedOut = true;
-    input.destroy(new Error("context_read range scan timed out"));
+    input.destroy(new Error("read range scan timed out"));
   }, timeoutMs);
   timer.unref();
 

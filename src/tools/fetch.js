@@ -56,10 +56,10 @@ function decodeNumericHtmlEntity(match, value) {
 async function fetchUrl(url, force) {
   let parsed;
   try { parsed = new URL(url); } catch {
-    invalidParams("context_fetch requires a valid URL");
+    invalidParams("fetch requires a valid URL");
   }
   if (!ALLOW_NON_HTTP_FETCH && parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    invalidParams("context_fetch only allows http and https URLs by default; set SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH=1 to allow other schemes");
+    invalidParams("fetch only allows http and https URLs by default; set SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH=1 to allow other schemes");
   }
 
   const key = createHash("sha256").update(url).digest("hex");
@@ -141,10 +141,10 @@ async function readLimitedText(res, maxBytes) {
 export async function fetchTool(args) {
   const { url, force = false, maxLines = MAX_LINES, maxBytes = MAX_BYTES } = args ?? {};
   if (force !== undefined && typeof force !== "boolean") {
-    invalidParams("context_fetch force must be a boolean when provided");
+    invalidParams("fetch force must be a boolean when provided");
   }
-  const lineLimit = validateInteger(maxLines, "context_fetch maxLines", 10, 200);
-  const byteLimit = validateInteger(maxBytes, "context_fetch maxBytes", 1024, MAX_BYTES);
+  const lineLimit = validateInteger(maxLines, "fetch maxLines", 10, 200);
+  const byteLimit = validateInteger(maxBytes, "fetch maxBytes", 1024, MAX_BYTES);
 
   const data = await fetchUrl(url, force);
   const formatted = formatOutput(data.content, lineLimit, byteLimit);
@@ -156,7 +156,7 @@ export async function fetchTool(args) {
     cached: data.cached,
     downloadLimited: data.limited,
   };
-  await recordStats("context_fetch", meta);
+  await recordStats("fetch", meta);
 
   return {
     content: [{ type: "text", text: formatted.text }],

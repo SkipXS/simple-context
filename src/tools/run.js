@@ -7,11 +7,11 @@ import { invalidParams, validateInteger } from "./shared.js";
 export async function runTool(args) {
   const { command, maxLines = MAX_LINES, maxBytes = MAX_BYTES, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS } = args ?? {};
   if (typeof command !== "string" || command.trim() === "") {
-    invalidParams("context_run requires a non-empty command string");
+    invalidParams("run requires a non-empty command string");
   }
-  const lineLimit = validateInteger(maxLines, "context_run maxLines", 10, 200);
-  const byteLimit = validateInteger(maxBytes, "context_run maxBytes", 1024, MAX_BYTES);
-  const timeoutLimit = validateInteger(timeoutMs, "context_run timeoutMs", MIN_COMMAND_TIMEOUT_MS, MAX_COMMAND_TIMEOUT_MS);
+  const lineLimit = validateInteger(maxLines, "run maxLines", 10, 200);
+  const byteLimit = validateInteger(maxBytes, "run maxBytes", 1024, MAX_BYTES);
+  const timeoutLimit = validateInteger(timeoutMs, "run timeoutMs", MIN_COMMAND_TIMEOUT_MS, MAX_COMMAND_TIMEOUT_MS);
 
   const { stdout, durationMs, outputTooLarge, code, signal } = await runCommand(command, { timeout: timeoutLimit, allowOutputTooLarge: true });
   const formatted = formatOutput(stdout, lineLimit, byteLimit);
@@ -34,7 +34,7 @@ export async function runTool(args) {
     timeoutMs: timeoutLimit,
     shell: COMMAND_SHELL_NAME,
   };
-  await recordStats("context_run", meta);
+  await recordStats("run", meta);
 
   return {
     content: [{ type: "text", text: formatted.text }],

@@ -5,7 +5,7 @@ import { recordStats } from "../stats.js";
 import { invalidParams, savingsForText, validateInteger } from "./shared.js";
 
 export async function logsTool(args) {
-  return await logsResult(args, "context_logs");
+  return await logsResult(args, "logs");
 }
 
 export async function logsResult(args, toolName) {

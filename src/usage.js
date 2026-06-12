@@ -190,16 +190,16 @@ function recommendTools(commandSummaries, toolSummaries) {
   const commandMap = new Map(commandSummaries.map((summary) => [summary.name, summary]));
   const toolMap = new Map(toolSummaries.map((summary) => [summary.name, summary]));
 
-  addRecommendation(recommendations, commandMap.get("git-history"), "context_diff mode=history", "Summarize git log output compactly without adding another tool.");
-  addRecommendation(recommendations, commandMap.get("dependencies"), "context_dependencies", "Summarize npm/pnpm/yarn dependency inspection output.");
-  addRecommendation(recommendations, commandMap.get("infra-logs"), "context_infra_logs", "Extract relevant docker/kubectl log blocks.");
-  addRecommendation(recommendations, commandMap.get("filesystem-discovery"), "context_size_or_find", "Provide bounded file finding and size summaries.");
-  addRecommendation(recommendations, commandMap.get("file-read"), "context_read path/fromLine/paths", "Use targeted ranges for one file and paths for additional non-ranged file previews.");
+  addRecommendation(recommendations, commandMap.get("git-history"), "diff mode=history", "Summarize git log output compactly without adding another tool.");
+  addRecommendation(recommendations, commandMap.get("dependencies"), "dependencies", "Summarize npm/pnpm/yarn dependency inspection output.");
+  addRecommendation(recommendations, commandMap.get("infra-logs"), "infra_logs", "Extract relevant docker/kubectl log blocks.");
+  addRecommendation(recommendations, commandMap.get("filesystem-discovery"), "size_or_find", "Provide bounded file finding and size summaries.");
+  addRecommendation(recommendations, commandMap.get("file-read"), "read path/fromLine/paths", "Use targeted ranges for one file and paths for additional non-ranged file previews.");
 
   const search = commandMap.get("search-discovery");
-  const searchTool = toolMap.get("context_search");
+  const searchTool = toolMap.get("search");
   if (search && (!searchTool || search.calls > searchTool.calls)) {
-    addRecommendation(recommendations, search, "context_search_workflow", "Improve search plus surrounding file-context workflows.");
+    addRecommendation(recommendations, search, "search_workflow", "Improve search plus surrounding file-context workflows.");
   }
 
   return recommendations;

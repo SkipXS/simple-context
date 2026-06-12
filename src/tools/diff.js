@@ -18,21 +18,21 @@ export async function diffTool(args) {
 
   let normalizedDiffPath = diffPath;
   if (diffPath !== undefined) {
-    if (typeof diffPath !== "string") invalidParams("context_diff path must be a string when provided");
+    if (typeof diffPath !== "string") invalidParams("diff path must be a string when provided");
     if (diffPath.trim() === "") normalizedDiffPath = undefined;
   }
-  if (mode !== "diff" && mode !== "status" && mode !== "history") invalidParams("context_diff mode must be \"diff\", \"status\", or \"history\"");
+  if (mode !== "diff" && mode !== "status" && mode !== "history") invalidParams("diff mode must be \"diff\", \"status\", or \"history\"");
   if (typeof staged !== "boolean") {
-    invalidParams("context_diff staged must be a boolean when provided");
+    invalidParams("diff staged must be a boolean when provided");
   }
   if (typeof stat !== "boolean") {
-    invalidParams("context_diff stat must be a boolean when provided");
+    invalidParams("diff stat must be a boolean when provided");
   }
 
-  const fileLimit = validateInteger(maxFiles, "context_diff maxFiles", 1, 100);
-  const hunkLimit = validateInteger(maxHunks, "context_diff maxHunks", 1, 200);
-  const lineLimit = validateInteger(maxLines, "context_diff maxLines", 10, 200);
-  const byteLimit = validateInteger(maxBytes, "context_diff maxBytes", 1024, MAX_BYTES);
+  const fileLimit = validateInteger(maxFiles, "diff maxFiles", 1, 100);
+  const hunkLimit = validateInteger(maxHunks, "diff maxHunks", 1, 200);
+  const lineLimit = validateInteger(maxLines, "diff maxLines", 10, 200);
+  const byteLimit = validateInteger(maxBytes, "diff maxBytes", 1024, MAX_BYTES);
 
   if (mode === "status") return await statusTool(normalizedDiffPath, staged, lineLimit, byteLimit);
   if (mode === "history") return await historyTool(normalizedDiffPath, fileLimit, lineLimit, byteLimit);
@@ -67,7 +67,7 @@ export async function diffTool(args) {
     hunksLimited: limitedDiff.hunksLimited,
     durationMs,
   };
-  await recordStats("context_diff", meta);
+  await recordStats("diff", meta);
 
   return {
     content: [{ type: "text", text: formatted.text }],
@@ -101,7 +101,7 @@ async function historyTool(diffPath, maxCommits, maxLines, maxBytes) {
     truncated: formatted.truncated,
     durationMs: Date.now() - started,
   };
-  await recordStats("context_diff", meta);
+  await recordStats("diff", meta);
 
   return { content: [{ type: "text", text: formatted.text }], _meta: meta };
 }
@@ -134,7 +134,7 @@ async function statusTool(diffPath, staged, maxLines, maxBytes) {
     truncated: formatted.truncated,
     durationMs: Date.now() - started,
   };
-  await recordStats("context_diff", meta);
+  await recordStats("diff", meta);
 
   return { content: [{ type: "text", text: formatted.text }], _meta: meta };
 }

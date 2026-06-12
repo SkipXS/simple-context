@@ -11,7 +11,7 @@ const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage"])
 export async function discoverTool(args) {
   const { mode = "summary" } = args ?? {};
   if (!["summary", "files", "tree", "outline"].includes(mode)) {
-    invalidParams("context_discover mode must be \"summary\", \"files\", \"tree\", or \"outline\"");
+    invalidParams("discover mode must be \"summary\", \"files\", \"tree\", or \"outline\"");
   }
 
   if (mode === "summary") return await summaryMode(args);
@@ -22,18 +22,18 @@ export async function discoverTool(args) {
 
 async function filesMode(args) {
   const { path: inputPath = ".", include, maxFiles = 500, maxLines = MAX_LINES, maxBytes = MAX_BYTES } = args ?? {};
-  if (typeof inputPath !== "string" || inputPath.trim() === "") invalidParams("context_discover path must be a non-empty string when provided");
-  if (include !== undefined && typeof include !== "string") invalidParams("context_discover include must be a string when provided");
-  const fileLimit = validateInteger(maxFiles, "context_discover maxFiles", 1, 5000);
-  const lineLimit = validateInteger(maxLines, "context_discover maxLines", 10, 200);
-  const byteLimit = validateInteger(maxBytes, "context_discover maxBytes", 1024, MAX_BYTES);
+  if (typeof inputPath !== "string" || inputPath.trim() === "") invalidParams("discover path must be a non-empty string when provided");
+  if (include !== undefined && typeof include !== "string") invalidParams("discover include must be a string when provided");
+  const fileLimit = validateInteger(maxFiles, "discover maxFiles", 1, 5000);
+  const lineLimit = validateInteger(maxLines, "discover maxLines", 10, 200);
+  const byteLimit = validateInteger(maxBytes, "discover maxBytes", 1024, MAX_BYTES);
 
   const started = Date.now();
   let matcher;
   try {
     matcher = include ? new RegExp(include) : undefined;
   } catch {
-    invalidParams("context_discover include must be a valid regular expression");
+    invalidParams("discover include must be a valid regular expression");
   }
   const { files, limited } = await listFiles(inputPath, matcher, fileLimit);
   const filtered = matcher && !limited ? files.filter((file) => matcher.test(file)) : files;
@@ -55,7 +55,7 @@ async function filesMode(args) {
     truncated: limited || filtered.length > shown.length || formatted.truncated,
     durationMs: Date.now() - started,
   };
-  await recordStats("context_discover", meta);
+  await recordStats("discover", meta);
 
   return { content: [{ type: "text", text: formatted.text }], _meta: meta };
 }
@@ -99,11 +99,11 @@ async function walkFiles(root, current, state) {
 
 async function treeMode(args) {
   const { path: inputPath = ".", maxDepth = 3, maxEntries = 200, maxLines = MAX_LINES, maxBytes = MAX_BYTES } = args ?? {};
-  if (typeof inputPath !== "string" || inputPath.trim() === "") invalidParams("context_discover path must be a non-empty string when provided");
-  const depthLimit = validateInteger(maxDepth, "context_discover maxDepth", 1, 10);
-  const entryLimit = validateInteger(maxEntries, "context_discover maxEntries", 1, 2000);
-  const lineLimit = validateInteger(maxLines, "context_discover maxLines", 10, 200);
-  const byteLimit = validateInteger(maxBytes, "context_discover maxBytes", 1024, MAX_BYTES);
+  if (typeof inputPath !== "string" || inputPath.trim() === "") invalidParams("discover path must be a non-empty string when provided");
+  const depthLimit = validateInteger(maxDepth, "discover maxDepth", 1, 10);
+  const entryLimit = validateInteger(maxEntries, "discover maxEntries", 1, 2000);
+  const lineLimit = validateInteger(maxLines, "discover maxLines", 10, 200);
+  const byteLimit = validateInteger(maxBytes, "discover maxBytes", 1024, MAX_BYTES);
 
   const started = Date.now();
   const root = path.resolve(inputPath);
@@ -127,7 +127,7 @@ async function treeMode(args) {
     truncated: state.omitted > 0 || state.depthLimited || formatted.truncated,
     durationMs: Date.now() - started,
   };
-  await recordStats("context_discover", meta);
+  await recordStats("discover", meta);
 
   return { content: [{ type: "text", text: formatted.text }], _meta: meta };
 }
@@ -177,8 +177,8 @@ async function readTreeEntries(directory, maxEntries) {
 
 async function summaryMode(args) {
   const { maxLines = MAX_LINES, maxBytes = MAX_BYTES } = args ?? {};
-  const lineLimit = validateInteger(maxLines, "context_discover maxLines", 10, 200);
-  const byteLimit = validateInteger(maxBytes, "context_discover maxBytes", 1024, MAX_BYTES);
+  const lineLimit = validateInteger(maxLines, "discover maxLines", 10, 200);
+  const byteLimit = validateInteger(maxBytes, "discover maxBytes", 1024, MAX_BYTES);
   const started = Date.now();
   const root = process.cwd();
   const lines = [`Project: ${root}`];
@@ -209,7 +209,7 @@ async function summaryMode(args) {
 
   const formatted = formatOutput(lines.join("\n"), lineLimit, byteLimit);
   const meta = { mode: "summary", totalLines: formatted.totalLines, totalBytes: formatted.totalBytes, ...savingsMeta(formatted), truncated: formatted.truncated, durationMs: Date.now() - started };
-  await recordStats("context_discover", meta);
+  await recordStats("discover", meta);
 
   return { content: [{ type: "text", text: formatted.text }], _meta: meta };
 }
@@ -224,10 +224,10 @@ async function readJsonIfExists(filePath) {
 
 async function outlineMode(args) {
   const { path: filePath, maxSymbols = 200, maxLines = MAX_LINES, maxBytes = MAX_BYTES } = args ?? {};
-  if (typeof filePath !== "string" || filePath.trim() === "") invalidParams("context_discover requires a non-empty path string for outline mode");
-  const symbolLimit = validateInteger(maxSymbols, "context_discover maxSymbols", 1, 1000);
-  const lineLimit = validateInteger(maxLines, "context_discover maxLines", 10, 200);
-  const byteLimit = validateInteger(maxBytes, "context_discover maxBytes", 1024, MAX_BYTES);
+  if (typeof filePath !== "string" || filePath.trim() === "") invalidParams("discover requires a non-empty path string for outline mode");
+  const symbolLimit = validateInteger(maxSymbols, "discover maxSymbols", 1, 1000);
+  const lineLimit = validateInteger(maxLines, "discover maxLines", 10, 200);
+  const byteLimit = validateInteger(maxBytes, "discover maxBytes", 1024, MAX_BYTES);
   const resolved = path.resolve(filePath);
   const stat = await fs.promises.stat(resolved);
   if (!stat.isFile()) invalidParams(`Not a file: ${filePath}`);
@@ -251,7 +251,7 @@ async function outlineMode(args) {
     truncated: outline.length > symbols.length || formatted.truncated,
     durationMs: Date.now() - started,
   };
-  await recordStats("context_discover", meta);
+  await recordStats("discover", meta);
 
   return { content: [{ type: "text", text: formatted.text }], _meta: meta };
 }

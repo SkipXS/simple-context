@@ -32,7 +32,7 @@ export async function updateCache(mutator) {
         await writeJsonAtomically(CACHE_FILE, cache);
       });
     } catch {
-      // Cache failures should not make context_fetch unusable.
+      // Cache failures should not make fetch unusable.
       const currentCache = await getLoadedCache();
       result = await mutator(currentCache);
       cache = pruneCache(result ?? currentCache);
