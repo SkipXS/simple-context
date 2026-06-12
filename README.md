@@ -15,6 +15,10 @@ A minimal MCP server that keeps large command, log, file, search, repo-discovery
 | `diff` | Reviewing compact Git diffs, changed-file status, or commit history | raw `git diff` / `git status` / `git log` output |
 | `usage` | Viewing savings stats, local usage reports, or guidance | manual accounting, guessing from project trees alone |
 
+## Security Model
+
+simple-context-limiter is intended for trusted local MCP clients. The `run` tool executes shell commands on the machine running the server, and `fetch` can access any HTTP(S) service reachable from that machine, including localhost and private networks. This is by design: the server limits output volume, not the authority of the client. Do not expose it to untrusted agents, prompts, or remote users unless you add your own sandboxing or network policy.
+
 ### `run`
 
 Runs a shell command and returns stdout. Output is automatically truncated when it exceeds 60 lines or 32 KB. Override with `maxLines` or `maxBytes` per call.

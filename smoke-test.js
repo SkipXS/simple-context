@@ -221,6 +221,7 @@ try {
   const hugeRangeFile = join(tempDir, "huge-range.txt");
   const scanLimitedRangeFile = join(tempDir, "scan-limited-range.txt");
   const dashFile = join(tempDir, "dash.txt");
+  const contextLimitFile = join(tempDir, "context-limit.txt");
   await writeFile(largeFile, Array.from({ length: 300 }, (_, i) => `file line ${i}`).join("\n"), "utf8");
   await writeFile(largeOneLineFile, "🙂".repeat(2048), "utf8");
   await writeFile(manyShortLinesFile, Array.from({ length: 300 }, () => "x").join("\n"), "utf8");
@@ -228,6 +229,17 @@ try {
   await writeFile(hugeRangeFile, `${"x".repeat(4096)}\nsmall\n`, "utf8");
   await writeFile(scanLimitedRangeFile, "x".repeat(4096), "utf8");
   await writeFile(dashFile, "-needle\nplain\n", "utf8");
+  await writeFile(contextLimitFile, [
+    "before-one-a",
+    "before-one-b",
+    "match-one",
+    "after-one-a",
+    "after-one-b",
+    "before-two-a",
+    "before-two-b",
+    "match-two",
+    "after-two",
+  ].join("\n"), "utf8");
 
   const preInitList = await rawRequest({ jsonrpc: "2.0", id: "pre-list", method: "tools/list" });
   assert.equal(preInitList.error.code, -32002);
@@ -911,6 +923,19 @@ try {
     assert.equal(grepContext.result._meta.shownMatches, 3);
     assert.equal(grepContext.result._meta.totalMatchesKnown, false);
     assert.match(grepContext.result.content[0].text, /more matches omitted/);
+
+    const limitedContext = await request("tools/call", {
+      name: "search",
+      arguments: { pattern: "match-", path: contextLimitFile, contextLines: 2, maxMatches: 1 },
+    });
+    assert.ok(limitedContext.result, JSON.stringify(limitedContext));
+    assert.equal(limitedContext.result._meta.shownMatches, 1);
+    assert.match(limitedContext.result.content[0].text, /match-one/);
+    assert.match(limitedContext.result.content[0].text, /after-one-b/);
+    assert.doesNotMatch(limitedContext.result.content[0].text, /before-two-a/);
+    assert.doesNotMatch(limitedContext.result.content[0].text, /before-two-b/);
+    assert.doesNotMatch(limitedContext.result.content[0].text, /match-two/);
+    assert.match(limitedContext.result.content[0].text, /more matches omitted/);
 
     const byteLimitedSearch = await request("tools/call", {
       name: "search",

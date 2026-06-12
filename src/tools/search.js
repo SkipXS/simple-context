@@ -395,7 +395,7 @@ async function searchWithContext(rg, pattern, searchPath, include, contextLines,
     commandError(`rg ${rgArgs.join(" ")}`, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge);
   }
 
-  const limited = limitRgContext(result.lines, maxMatches);
+  const limited = limitRgContext(result.lines, maxMatches, contextLines);
   const text = limited.text || "(no matches)";
   const formatted = formatOutput(text, maxLines, maxBytes);
   const meta = {
@@ -417,8 +417,11 @@ async function searchWithContext(rg, pattern, searchPath, include, contextLines,
   return { content: [{ type: "text", text: formatted.text }], _meta: meta };
 }
 
-function limitRgContext(lines, maxMatches) {
+function limitRgContext(lines, maxMatches, contextLines) {
   const output = [];
+  let pendingContext = [];
+  let pendingSeparator = false;
+  let lastAcceptedMatch;
   let matchesRead = 0;
   let shownMatches = 0;
   let matchLimited = false;
@@ -428,22 +431,42 @@ function limitRgContext(lines, maxMatches) {
     if (!parsed) continue;
 
     if (parsed.type === "separator") {
-      if (output.length > 0 && output.at(-1) !== "--") output.push("--");
+      pendingContext = [];
+      pendingSeparator = output.length > 0 && output.at(-1) !== "--";
+      lastAcceptedMatch = undefined;
     } else if (parsed.type === "match") {
       matchesRead++;
       if (shownMatches >= maxMatches) {
         matchLimited = true;
         break;
       }
+      if (pendingSeparator) output.push("--");
+      output.push(...pendingContext);
+      pendingContext = [];
+      pendingSeparator = false;
+      lastAcceptedMatch = parsed;
       shownMatches++;
       output.push(formatRgContextLine(parsed, ":"));
-    } else if (parsed.type === "context" && shownMatches <= maxMatches) {
+    } else if (isAfterAcceptedMatchContext(parsed, lastAcceptedMatch, contextLines)) {
+      pendingSeparator = false;
       output.push(formatRgContextLine(parsed, "-"));
+    } else {
+      pendingContext.push(formatRgContextLine(parsed, "-"));
     }
   }
 
   if (matchLimited) output.push("... more matches omitted ...");
   return { text: output.join("\n"), matchesRead, shownMatches, matchLimited };
+}
+
+function isAfterAcceptedMatchContext(parsed, lastAcceptedMatch, contextLines) {
+  if (!lastAcceptedMatch || parsed.type !== "context" || parsed.file !== lastAcceptedMatch.file) return false;
+  const lineNumber = Number.parseInt(parsed.lineNumber, 10);
+  const matchLineNumber = Number.parseInt(lastAcceptedMatch.lineNumber, 10);
+  return Number.isInteger(lineNumber)
+    && Number.isInteger(matchLineNumber)
+    && lineNumber > matchLineNumber
+    && lineNumber <= matchLineNumber + contextLines;
 }
 
 function parseRgContextLine(line) {
