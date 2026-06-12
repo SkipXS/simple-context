@@ -520,6 +520,13 @@ try {
   assert.match(readMany.result.content[0].text, /dash\.txt/);
   assert.match(readMany.result.content[0].text, /-needle/);
 
+  const invalidReadPathAndPaths = await request("tools/call", {
+    name: "context_read",
+    arguments: { path: largeFile, paths: [dashFile] },
+  });
+  assert.equal(invalidReadPathAndPaths.error.code, -32602);
+  assert.match(invalidReadPathAndPaths.error.message, /either path or paths/);
+
   const invalidReadManyPaths = await request("tools/call", {
     name: "context_read",
     arguments: { paths: Array.from({ length: 21 }, (_, i) => `${i}.txt`) },
@@ -939,14 +946,16 @@ try {
     await git(["commit", "-m", "initial"]);
     await writeFile(join(gitDir, "a.txt"), changedLines.join("\n"), "utf8");
     await writeFile(join(gitDir, "b.txt"), "changed\n", "utf8");
+    await writeFile(join(gitDir, "untracked.txt"), "new\n", "utf8");
 
     const diffRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
       const { callTool } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "src", "tools.js")).href)});
       const diff = await callTool('context_diff', { maxFiles: 1, maxHunks: 1, maxBytes: 4096 });
       const blankPathDiff = await callTool('context_diff', { path: '', maxBytes: 4096 });
       const changedFiles = await callTool('context_diff', { mode: 'status', maxBytes: 4096 });
+      const noStagedStatus = await callTool('context_diff', { mode: 'status', staged: true, maxBytes: 4096 });
       const noStagedDiff = await callTool('context_diff', { staged: true, maxBytes: 4096 });
-      console.log(JSON.stringify({ diff: { text: diff.content[0].text, meta: diff._meta }, blankPathDiff: { text: blankPathDiff.content[0].text, meta: blankPathDiff._meta }, changedFiles: { text: changedFiles.content[0].text, meta: changedFiles._meta }, noStagedDiff: { text: noStagedDiff.content[0].text, meta: noStagedDiff._meta } }));
+      console.log(JSON.stringify({ diff: { text: diff.content[0].text, meta: diff._meta }, blankPathDiff: { text: blankPathDiff.content[0].text, meta: blankPathDiff._meta }, changedFiles: { text: changedFiles.content[0].text, meta: changedFiles._meta }, noStagedStatus: { text: noStagedStatus.content[0].text, meta: noStagedStatus._meta }, noStagedDiff: { text: noStagedDiff.content[0].text, meta: noStagedDiff._meta } }));
     `], {
       cwd: gitDir,
       timeout: 5_000,
@@ -974,10 +983,37 @@ try {
     assert.equal(diffPayload.blankPathDiff.meta.filesChanged, 2);
     assert.match(diffPayload.changedFiles.text, /a\.txt/);
     assert.match(diffPayload.changedFiles.text, /b\.txt/);
+    assert.doesNotMatch(diffPayload.changedFiles.text, /untracked\.txt/);
     assert.equal(diffPayload.changedFiles.meta.changedFiles, 2);
+    assert.equal(diffPayload.changedFiles.meta.staged, false);
+    assert.equal(diffPayload.noStagedStatus.text, "(no changed files)");
+    assert.equal(diffPayload.noStagedStatus.meta.staged, true);
+    assert.equal(diffPayload.noStagedStatus.meta.changedFiles, 0);
     assert.equal(diffPayload.noStagedDiff.text, "(no diff)");
     assert.equal(diffPayload.noStagedDiff.meta.staged, true);
     assert.equal(diffPayload.noStagedDiff.meta.truncated, false);
+
+    await git(["add", "a.txt"]);
+    const stagedStatusRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
+      const { callTool } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "src", "tools.js")).href)});
+      const status = await callTool('context_diff', { mode: 'status', staged: true, maxBytes: 4096 });
+      console.log(JSON.stringify({ text: status.content[0].text, meta: status._meta }));
+    `], {
+      cwd: gitDir,
+      timeout: 5_000,
+      env: {
+        ...process.env,
+        HOME: join(tempDir, "diff-home"),
+        USERPROFILE: join(tempDir, "diff-home"),
+      },
+    });
+    assert.equal(stagedStatusRun.code, 0, stagedStatusRun.stderr);
+    const stagedStatusPayload = JSON.parse(stagedStatusRun.stdout.trim());
+    assert.match(stagedStatusPayload.text, /a\.txt/);
+    assert.doesNotMatch(stagedStatusPayload.text, /b\.txt/);
+    assert.doesNotMatch(stagedStatusPayload.text, /untracked\.txt/);
+    assert.equal(stagedStatusPayload.meta.staged, true);
+    assert.equal(stagedStatusPayload.meta.changedFiles, 1);
   }
 
   const statsRun = await runProcess(process.execPath, ["--input-type=module", "-e", `

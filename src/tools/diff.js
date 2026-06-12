@@ -34,7 +34,7 @@ export async function diffTool(args) {
   const lineLimit = validateInteger(maxLines, "context_diff maxLines", 10, 200);
   const byteLimit = validateInteger(maxBytes, "context_diff maxBytes", 1024, MAX_BYTES);
 
-  if (mode === "status") return await statusTool(normalizedDiffPath, lineLimit, byteLimit);
+  if (mode === "status") return await statusTool(normalizedDiffPath, staged, lineLimit, byteLimit);
 
   const started = Date.now();
   const diffArgs = gitDiffArgs(staged, [], normalizedDiffPath);
@@ -74,21 +74,24 @@ export async function diffTool(args) {
   };
 }
 
-async function statusTool(diffPath, maxLines, maxBytes) {
+async function statusTool(diffPath, staged, maxLines, maxBytes) {
   const started = Date.now();
-  const args = ["status", "--porcelain=v1"];
+  const args = ["status", "--porcelain=v1", "--untracked-files=no"];
   if (diffPath !== undefined) args.push("--", diffPath);
   const result = await runProcess("git", args, { cwd: process.cwd(), timeout: 30_000 });
   if (result.code !== 0 || result.timedOut || result.outputTooLarge) {
     commandError(`git ${args.join(" ")}`, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge, 30_000);
   }
 
-  const lines = result.stdout.trimEnd().split("\n").filter(Boolean).map(formatStatusLine);
+  const lines = result.stdout.trimEnd().split("\n").filter(Boolean)
+    .filter((line) => !staged || line[0] !== " ")
+    .map(formatStatusLine);
   const text = lines.join("\n") || "(no changed files)";
   const formatted = formatOutput(text, maxLines, maxBytes);
   const meta = {
     mode: "status",
     path: diffPath,
+    staged,
     changedFiles: lines.length,
     totalLines: formatted.totalLines,
     totalBytes: formatted.totalBytes,

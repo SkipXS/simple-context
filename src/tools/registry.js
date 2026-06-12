@@ -184,7 +184,7 @@ export const tools = {
         type: "object",
         properties: {
           mode: { type: "string", enum: ["summary", "files", "tree", "outline"], description: "Discovery mode. Default: summary." },
-          path: { type: "string", description: "File or directory path to list. Default: ." },
+          path: { type: "string", description: "File or directory path to list. Default: . For mode=outline, this must be a single source file." },
           include: { type: "string", description: "Optional JavaScript regular expression used to filter returned file paths." },
           maxFiles: { type: "integer", minimum: 1, maximum: 5000, description: "Maximum files to show. Default: 500." },
           maxDepth: { type: "integer", minimum: 1, maximum: 10, description: "Maximum directory depth. Default: 3." },

@@ -7,6 +7,9 @@ import { recordStats } from "../stats.js";
 import { invalidParams, validateInteger } from "./shared.js";
 
 export async function readTool(args) {
+  if ((args ?? {}).path !== undefined && (args ?? {}).paths !== undefined) {
+    invalidParams("context_read accepts either path or paths, not both");
+  }
   if ((args ?? {}).paths !== undefined) return await readManyTool(args, "context_read");
 
   const result = await readFilePreview(args, "context_read");
