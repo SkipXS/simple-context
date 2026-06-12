@@ -69,6 +69,7 @@ async function saveStats(nextStats) {
 }
 
 export async function getStats() {
+  await statsUpdate.catch(() => {});
   if (stats === undefined) stats = await loadStats();
   return stats;
 }
@@ -85,7 +86,7 @@ function addCounter(target, meta) {
   target.estimatedTokensSaved += Math.ceil(savedBytes / 4);
 }
 
-export async function recordStats(toolName, meta) {
+export function recordStats(toolName, meta) {
   statsUpdate = statsUpdate.catch(() => {}).then(async () => {
     try {
       await withFileLock(STATS_FILE, async () => {
@@ -106,7 +107,6 @@ export async function recordStats(toolName, meta) {
       // Stats failures should not make context tools unusable.
     }
   });
-  await statsUpdate;
 }
 
 export function withSavedPercent(counter) {

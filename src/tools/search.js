@@ -7,6 +7,9 @@ import { commandError, runProcessLines } from "../process.js";
 import { recordStats } from "../stats.js";
 import { invalidParams, savingsForText, savingsMeta, validateInteger } from "./shared.js";
 
+const MATCH_SEPARATOR = "\x1f";
+const CONTEXT_SEPARATOR = "\x1e";
+
 function pathEntries() {
   const raw = process.env.PATH ?? process.env.Path ?? "";
   return raw.split(path.delimiter).filter(Boolean);
@@ -268,14 +271,26 @@ function formatAstMatches(matches, limited) {
 
 async function searchWithContext(rg, pattern, searchPath, include, contextLines, maxMatches, maxLines, maxBytes) {
   const started = Date.now();
-  const rgArgs = ["--line-number", "--with-filename", "--color", "never", "--no-heading", "-C", String(contextLines)];
+  const rgArgs = [
+    "--line-number",
+    "--with-filename",
+    "--color",
+    "never",
+    "--no-heading",
+    "-C",
+    String(contextLines),
+    "--field-match-separator",
+    MATCH_SEPARATOR,
+    "--field-context-separator",
+    CONTEXT_SEPARATOR,
+  ];
   if (include) rgArgs.push("--glob", include);
   rgArgs.push("--", pattern, searchPath);
 
   const result = await runProcessLines(rg, rgArgs, {
     cwd: process.cwd(),
     timeout: 120_000,
-    maxLines: maxMatches * (contextLines * 2 + 3),
+    maxLines: (maxMatches + 1) * (contextLines * 2 + 3) + 20,
     maxBytes: MAX_READ_BYTES,
   });
   if (result.code === 1) return await noMatches(rg, result.durationMs, contextLines);
@@ -283,21 +298,78 @@ async function searchWithContext(rg, pattern, searchPath, include, contextLines,
     commandError(`rg ${rgArgs.join(" ")}`, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge);
   }
 
-  const text = result.lines.join("\n") || "(no matches)";
+  const limited = limitRgContext(result.lines, maxMatches);
+  const text = limited.text || "(no matches)";
   const formatted = formatOutput(text, maxLines, maxBytes);
   const meta = {
     rgPath: rg,
     contextLines,
     linesRead: result.lines.length,
+    totalMatches: limited.matchLimited || result.truncated || result.outputTooLarge ? undefined : limited.matchesRead,
+    totalMatchesKnown: !(limited.matchLimited || result.truncated || result.outputTooLarge),
+    matchesRead: limited.matchLimited || result.truncated || result.outputTooLarge ? limited.matchesRead : undefined,
+    shownMatches: limited.shownMatches,
     totalLines: formatted.totalLines,
     totalBytes: formatted.totalBytes,
     ...savingsMeta(formatted),
-    truncated: result.truncated || result.outputTooLarge || formatted.truncated,
+    truncated: limited.matchLimited || result.truncated || result.outputTooLarge || formatted.truncated,
     durationMs: Date.now() - started,
   };
   await recordStats("search", meta);
 
   return { content: [{ type: "text", text: formatted.text }], _meta: meta };
+}
+
+function limitRgContext(lines, maxMatches) {
+  const output = [];
+  let matchesRead = 0;
+  let shownMatches = 0;
+  let matchLimited = false;
+
+  for (const line of lines) {
+    const parsed = parseRgContextLine(line);
+    if (!parsed) continue;
+
+    if (parsed.type === "separator") {
+      if (output.length > 0 && output.at(-1) !== "--") output.push("--");
+    } else if (parsed.type === "match") {
+      matchesRead++;
+      if (shownMatches >= maxMatches) {
+        matchLimited = true;
+        break;
+      }
+      shownMatches++;
+      output.push(formatRgContextLine(parsed, ":"));
+    } else if (parsed.type === "context" && shownMatches <= maxMatches) {
+      output.push(formatRgContextLine(parsed, "-"));
+    }
+  }
+
+  if (matchLimited) output.push("... more matches omitted ...");
+  return { text: output.join("\n"), matchesRead, shownMatches, matchLimited };
+}
+
+function parseRgContextLine(line) {
+  if (line === "--") return { type: "separator" };
+  const matchIndex = line.indexOf(MATCH_SEPARATOR);
+  const contextIndex = line.indexOf(CONTEXT_SEPARATOR);
+  const type = matchIndex !== -1 && (contextIndex === -1 || matchIndex < contextIndex) ? "match" : "context";
+  const separator = type === "match" ? MATCH_SEPARATOR : CONTEXT_SEPARATOR;
+  const first = line.indexOf(separator);
+  if (first === -1) return undefined;
+  const second = line.indexOf(separator, first + separator.length);
+  if (second === -1) return undefined;
+
+  return {
+    type,
+    file: line.slice(0, first),
+    lineNumber: line.slice(first + separator.length, second),
+    text: line.slice(second + separator.length),
+  };
+}
+
+function formatRgContextLine(line, separator) {
+  return `${line.file}${separator}${line.lineNumber}${separator}${line.text}`;
 }
 
 async function noMatches(rg, durationMs, contextLines) {

@@ -5,8 +5,9 @@ import { withFileLock } from "./storage.js";
 
 const MAX_REPORT_EVENTS = 10_000;
 const REPORT_READ_BYTES = 5 * 1024 * 1024;
+let usageWrite = Promise.resolve();
 
-export async function recordUsage(toolName, args, result, error, durationMs) {
+export function recordUsage(toolName, args, result, error, durationMs) {
   if (!usageLogEnabled()) return;
   const project = projectKey();
   if (!project) return;
@@ -28,15 +29,17 @@ export async function recordUsage(toolName, args, result, error, durationMs) {
     args: summarizeArgs(args),
   };
 
-  try {
-    await fs.promises.mkdir(path.dirname(USAGE_LOG_FILE), { recursive: true });
-    await withFileLock(USAGE_LOG_FILE, async () => {
-      await fs.promises.appendFile(USAGE_LOG_FILE, `${JSON.stringify(event)}\n`, "utf8");
-      await pruneUsageLogIfNeeded();
-    });
-  } catch {
-    // Usage logging must never affect tool behavior.
-  }
+  usageWrite = usageWrite.catch(() => {}).then(async () => {
+    try {
+      await fs.promises.mkdir(path.dirname(USAGE_LOG_FILE), { recursive: true });
+      await withFileLock(USAGE_LOG_FILE, async () => {
+        await fs.promises.appendFile(USAGE_LOG_FILE, `${JSON.stringify(event)}\n`, "utf8");
+        await pruneUsageLogIfNeeded();
+      });
+    } catch {
+      // Usage logging must never affect tool behavior.
+    }
+  });
 }
 
 async function pruneUsageLogIfNeeded() {
@@ -67,6 +70,7 @@ function completeJsonLines(text) {
 }
 
 export async function usageReport({ maxEvents = 1000 } = {}) {
+  await usageWrite.catch(() => {});
   const eventLimit = normalizeEventLimit(maxEvents);
   const entries = await readUsageEntries(eventLimit);
   const project = projectKey();

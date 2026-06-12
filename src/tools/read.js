@@ -6,6 +6,8 @@ import { decodeUtf8, formatOutput } from "../output.js";
 import { recordStats } from "../stats.js";
 import { invalidParams, validateInteger } from "./shared.js";
 
+const READ_MANY_CONCURRENCY = 4;
+
 export async function readTool(args) {
   if ((args ?? {}).paths !== undefined) {
     return await readManyTool({ ...args, paths: normalizeReadPaths(args) }, "read");
@@ -70,7 +72,7 @@ export async function readManyTool(args, toolName = "read") {
   const byteLimit = validateInteger(maxBytesPerFile, `${toolName} maxBytesPerFile`, 1024, MAX_BYTES);
   const totalLineLimit = validateInteger(maxTotalLines, `${toolName} maxTotalLines`, 10, 500);
   const totalLimit = validateInteger(maxTotalBytes, `${toolName} maxTotalBytes`, 1024, MAX_BYTES);
-  const results = [];
+  const previewArgsList = [];
 
   for (const filePath of paths) {
     if (typeof filePath !== "string" || filePath.trim() === "") {
@@ -81,8 +83,10 @@ export async function readManyTool(args, toolName = "read") {
       previewArgs.fromLine = fromLine;
       previewArgs.toLine = toLine;
     }
-    results.push(await readFilePreview(previewArgs, toolName));
+    previewArgsList.push(previewArgs);
   }
+
+  const results = await mapLimited(previewArgsList, READ_MANY_CONCURRENCY, (previewArgs) => readFilePreview(previewArgs, toolName));
 
   const combined = results
     .map((result) => `--- ${result._meta.path} ---\n${result.content[0].text}`)
@@ -122,6 +126,22 @@ export async function readManyTool(args, toolName = "read") {
     content: [{ type: "text", text: formatted.text }],
     _meta: meta,
   };
+}
+
+async function mapLimited(items, limit, mapper) {
+  const results = new Array(items.length);
+  let next = 0;
+
+  async function worker() {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await mapper(items[index]);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 async function readFilePreview(args, toolName) {

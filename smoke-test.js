@@ -908,6 +908,9 @@ try {
     assert.ok(grepContext.result, JSON.stringify(grepContext));
     assert.match(grepContext.result.content[0].text, /file line 29/);
     assert.equal(typeof grepContext.result._meta.rgPath, "string");
+    assert.equal(grepContext.result._meta.shownMatches, 3);
+    assert.equal(grepContext.result._meta.totalMatchesKnown, false);
+    assert.match(grepContext.result.content[0].text, /more matches omitted/);
 
     const byteLimitedSearch = await request("tools/call", {
       name: "search",
