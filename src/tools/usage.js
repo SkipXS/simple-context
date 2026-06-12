@@ -50,6 +50,11 @@ async function statsResult(maxLines, maxBytes) {
     _meta: {
       ...stats,
       totalLines: formatted.totalLines,
+      responseTotalBytes: formatted.totalBytes,
+      responseReturnedBytes: formatted.returnedBytes,
+      responseSavedBytes: formatted.savedBytes,
+      responseSavedPercent: formatted.savedPercent,
+      responseEstimatedTokensSaved: formatted.estimatedTokensSaved,
       truncated: formatted.truncated,
       durationMs: Date.now() - started,
     },

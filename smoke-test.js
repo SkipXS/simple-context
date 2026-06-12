@@ -81,6 +81,25 @@ function notification(method, params) {
   child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n");
 }
 
+function rawRequest(payload) {
+  const start = unexpectedResponses.length;
+  child.stdin.write(JSON.stringify(payload) + "\n");
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      clearInterval(interval);
+      reject(new Error("timed out waiting for raw response"));
+    }, 2_000);
+    const interval = setInterval(() => {
+      if (unexpectedResponses.length <= start) return;
+
+      clearTimeout(timer);
+      clearInterval(interval);
+      resolve(unexpectedResponses.splice(start, 1)[0]);
+    }, 10);
+  });
+}
+
 function shellQuote(value) {
   if (process.platform === "win32") return `"${value.replaceAll("\"", "\\\"")}"`;
   return `'${value.replaceAll("'", "'\\''")}'`;
@@ -210,6 +229,32 @@ try {
   const unknownMethod = await request("unknown/method", {});
   assert.equal(unknownMethod.error.code, -32601);
   assert.match(unknownMethod.error.message, /Unknown method/);
+
+  const invalidNullRequest = await rawRequest(null);
+  assert.equal(invalidNullRequest.id, null);
+  assert.equal(invalidNullRequest.error.code, -32600);
+  assert.match(invalidNullRequest.error.message, /Invalid Request/);
+
+  const invalidMissingMethod = await rawRequest({ jsonrpc: "2.0", id: "invalid" });
+  assert.equal(invalidMissingMethod.id, "invalid");
+  assert.equal(invalidMissingMethod.error.code, -32600);
+  assert.match(invalidMissingMethod.error.message, /Invalid Request/);
+
+  const emptyBatch = await rawRequest([]);
+  assert.equal(emptyBatch.id, null);
+  assert.equal(emptyBatch.error.code, -32600);
+
+  const batch = await rawRequest([
+    { jsonrpc: "2.0", id: "list", method: "tools/list" },
+    { jsonrpc: "2.0", method: "notifications/initialized" },
+    null,
+    { jsonrpc: "2.0", id: "missing", method: "unknown/method" },
+  ]);
+  assert.equal(Array.isArray(batch), true);
+  assert.equal(batch.length, 3);
+  assert.equal(batch.find((response) => response.id === "list").result.tools.length, 8);
+  assert.equal(batch.find((response) => response.id === null).error.code, -32600);
+  assert.equal(batch.find((response) => response.id === "missing").error.code, -32601);
 
   const listed = await request("tools/list", {});
   assert.deepEqual(listed.result.tools.map((tool) => tool.name), [
@@ -1047,6 +1092,12 @@ try {
   assert.equal(parsedStats.byTool.context_fetch.calls, 1);
   assert.ok(parsedStats.returnedBytes <= parsedStats.totalBytes);
   assert.ok(parsedStats.byTool.context_run.returnedBytes <= parsedStats.byTool.context_run.totalBytes);
+  assert.equal(typeof parsedStats.responseTotalBytes, "number");
+  assert.equal(typeof parsedStats.responseReturnedBytes, "number");
+  assert.equal(typeof parsedStats.responseSavedBytes, "number");
+  assert.equal(typeof parsedStats.responseSavedPercent, "number");
+  assert.equal(typeof parsedStats.responseEstimatedTokensSaved, "number");
+  assert.ok(parsedStats.responseReturnedBytes <= parsedStats.responseTotalBytes);
   assert.ok(parsedStats.savedBytes > 0);
   assert.ok(parsedStats.estimatedTokensSaved > 0);
 

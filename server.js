@@ -21,13 +21,21 @@ function send(message) {
 }
 
 function sendError(id, code, message, data) {
-  const error = { code, message };
-  if (data !== undefined) error.data = data;
-  send({ jsonrpc: "2.0", id, error });
+  send(errorResponse(id, code, message, data));
 }
 
-function sendErrorIfRequest(hasId, id, code, message, data) {
-  if (hasId) sendError(id, code, message, data);
+function errorResponse(id, code, message, data) {
+  const error = { code, message };
+  if (data !== undefined) error.data = data;
+  return { jsonrpc: "2.0", id, error };
+}
+
+function resultResponse(id, result) {
+  return { jsonrpc: "2.0", id, result };
+}
+
+function isRequestObject(message) {
+  return message !== null && typeof message === "object" && !Array.isArray(message);
 }
 
 function hasRequestId(message) {
@@ -53,9 +61,47 @@ const instructions = "Default to context_run, context_logs, context_read, contex
 
 const rl = createInterface({ input: process.stdin });
 
+async function handleMessage(msg) {
+  if (!isRequestObject(msg)) return errorResponse(null, -32600, "Invalid Request");
+
+  const hasId = hasRequestId(msg);
+  const { id, method, params } = msg;
+  if (typeof method !== "string") return errorResponse(hasId ? id : null, -32600, "Invalid Request");
+
+  try {
+    if (method === "initialize") {
+      if (!hasId) return undefined;
+      return resultResponse(id, {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
+        instructions,
+      });
+    }
+
+    if (method === "notifications/initialized") return undefined;
+
+    if (method === "tools/list") {
+      if (!hasId) return undefined;
+      return resultResponse(id, tools);
+    }
+
+    if (method === "tools/call") {
+      const { name, arguments: args } = params ?? {};
+      const result = await callTool(name, args);
+      if (!hasId) return undefined;
+      return resultResponse(id, result);
+    }
+
+    if (!hasId) return undefined;
+    return errorResponse(id, -32601, `Unknown method: ${method}`);
+  } catch (e) {
+    if (!hasId) return undefined;
+    return errorResponse(id, rpcCode(e), e.message, commandErrorData(e) ?? errorData(e));
+  }
+}
+
 rl.on("line", async (line) => {
-  let id;
-  let hasId = false;
   try {
     let msg;
     try {
@@ -65,39 +111,21 @@ rl.on("line", async (line) => {
       return;
     }
 
-    hasId = hasRequestId(msg);
-    ({ id } = msg);
-    const { method, params } = msg;
+    if (Array.isArray(msg)) {
+      if (msg.length === 0) {
+        sendError(null, -32600, "Invalid Request");
+        return;
+      }
 
-    if (method === "initialize") {
-      if (hasId) {
-        send({
-          jsonrpc: "2.0", id,
-          result: {
-            protocolVersion: "2024-11-05",
-            capabilities: { tools: {} },
-            serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
-            instructions,
-          },
-        });
-      }
-    } else if (method === "notifications/initialized") {
-      // no response needed
-    } else if (method === "tools/list") {
-      if (hasId) send({ jsonrpc: "2.0", id, result: tools });
-    } else if (method === "tools/call") {
-      try {
-        const { name, arguments: args } = params ?? {};
-        const result = await callTool(name, args);
-        if (hasId) send({ jsonrpc: "2.0", id, result });
-      } catch (e) {
-        sendErrorIfRequest(hasId, id, rpcCode(e), e.message, commandErrorData(e) ?? errorData(e));
-      }
-    } else {
-      sendErrorIfRequest(hasId, id, -32601, `Unknown method: ${method}`);
+      const responses = (await Promise.all(msg.map(handleMessage))).filter(Boolean);
+      if (responses.length > 0) send(responses);
+      return;
     }
+
+    const response = await handleMessage(msg);
+    if (response) send(response);
   } catch (e) {
-    sendErrorIfRequest(hasId, id, rpcCode(e), e.message);
+    sendError(null, rpcCode(e), e.message);
   }
 });
 
