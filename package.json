@@ -26,9 +26,12 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "node check-syntax.js && node scripts/output-quality-check.js",
+    "check": "node check-syntax.js && npm run test:unit && node scripts/output-quality-check.js",
     "quality": "node scripts/output-quality-check.js",
-    "test": "node smoke-test.js",
+    "test": "npm run test:unit && npm run test:smoke",
+    "test:unit": "node --test test/*.test.js",
+    "test:smoke": "node smoke-test.js",
+    "audit": "npm audit --omit=dev",
     "release:check": "npm pack --dry-run && node pack-smoke-test.js",
     "prepack": "npm run check && npm test"
   },

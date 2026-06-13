@@ -23,7 +23,9 @@ const files = [
   "smoke-test.js",
   "pack-smoke-test.js",
   "check-syntax.js",
+  ...await jsFiles("scripts"),
   ...await jsFiles("src"),
+  ...await jsFiles("test"),
 ];
 
 for (const file of files) await check(file);

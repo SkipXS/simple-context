@@ -367,11 +367,13 @@ If you need a specific command shell for `sc-run`, set `SIMPLE_CONTEXT_LIMITER_S
 ```bash
 git clone https://github.com/SkipXS/simple-context-limiter.git
 cd simple-context-limiter
-npm test
+npm ci
 npm run check
+npm test
+npm run audit
 ```
 
-Then point your MCP client at the local `server.js` with Node.
+`npm run check` runs syntax, unit, and output-quality checks; `npm test` runs unit and smoke tests. Then point your MCP client at the local `server.js` with Node.
 
 ## Version Pinning
 
