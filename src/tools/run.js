@@ -29,7 +29,7 @@ export async function runTool(args) {
     savedPercent: totalBytes > 0 ? Math.round((savedBytes / totalBytes) * 100) : 0,
     estimatedTokensSaved: Math.ceil(savedBytes / 4),
     truncated,
-    ...truncationMeta(truncated, truncationReason, "Increase maxLines/maxBytes or use sc-logs for stderr/error diagnostics."),
+    ...truncationMeta(truncated, truncationReason, runTruncationHint(outputTooLarge)),
     empty: stdout === "",
     emptyReason: stdout === "" ? "no_output" : undefined,
     outputTooLarge,
@@ -44,4 +44,10 @@ export async function runTool(args) {
   await recordStats("run", meta);
 
   return toolTextResult(formatted.text, meta, byteLimit);
+}
+
+function runTruncationHint(outputTooLarge) {
+  return outputTooLarge
+    ? "Use a narrower command or raise SIMPLE_CONTEXT_LIMITER_MAX_COMMAND_BYTES."
+    : "Increase maxLines/maxBytes.";
 }

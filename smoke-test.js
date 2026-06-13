@@ -207,6 +207,7 @@ try {
   assert.equal(emptyOutput.totalLines, 0);
   assert.equal(emptyOutput.totalBytes, 0);
   assert.ok(emptyOutput.returnedBytes > 0);
+  assert.equal(formatOutput("one\n").totalLines, 1);
   const customByteLimit = formatOutput("x".repeat(8192), 60, 1024);
   assert.equal(customByteLimit.truncated, true);
   assert.ok(Buffer.byteLength(customByteLimit.text, "utf8") <= 1024);
@@ -389,7 +390,7 @@ try {
   const readSchema = listed.result.tools.find((tool) => tool.name === "sc-read").inputSchema;
   assert.equal(readSchema.type, "object");
   assert.deepEqual(readSchema.anyOf, [{ required: ["path"] }, { required: ["paths"] }]);
-  assert.match(readSchema.properties.paths.description, /path is also provided/);
+  assert.match(readSchema.properties.paths.description, /Extra file paths/);
 
   const slowCommand = nodeEvalCommand("setTimeout(() => {}, 500)");
   const limitedStart = Date.now();
@@ -631,12 +632,13 @@ try {
   assert.equal(byteLimitedRun.result._meta.truncated, true);
   assert.deepEqual(byteLimitedRun.result._meta.truncation, {
     reason: "format_bytes",
-    retryHint: "Increase maxLines/maxBytes or use sc-logs for stderr/error diagnostics.",
+    retryHint: "Increase maxLines/maxBytes.",
   });
   assert.ok(byteLimitedRun.result._meta.response.returnedBytes <= 1024);
   assert.ok(byteLimitedRun.result._meta.response.savedBytes > 0);
   assert.equal((byteLimitedRun.result.content[0].text.match(/\[truncated:/g) ?? []).length, 1);
-  assert.match(byteLimitedRun.result.content[0].text, /\[retry: retry with higher maxLines\/maxBytes/);
+  assert.match(byteLimitedRun.result.content[0].text, /\[retry: raise maxLines\/maxBytes/);
+  assert.doesNotMatch(byteLimitedRun.result.content[0].text, /sc-logs/);
 
   const outputTooLargeCommand = isPowerShellConfigured()
     ? `& ${shellQuote(process.execPath)} -e "process.stdout.write('x'.repeat(50000))"`
@@ -712,7 +714,7 @@ try {
   assert.equal(logs.result._meta.shell, COMMAND_SHELL_NAME);
   assert.equal(logs.result._meta.timeoutMs, 120_000);
   assert.match(logs.result.content[0].text, /Command exit 7/);
-  assert.match(logs.result.content[0].text, /Blocks sorted by severity, then line/);
+  assert.doesNotMatch(logs.result.content[0].text, /Blocks sorted by severity, then line/);
   assert.match(logs.result.content[0].text, /AssertionError/);
   assert.match(logs.result.content[0].text, /at test\.js:10:5/);
   assert.doesNotMatch(logs.result.content[0].text, /line 0/);
@@ -1148,7 +1150,7 @@ try {
     assert.equal(grepContext.result._meta.shownMatches, 3);
     assert.equal(grepContext.result._meta.totalMatchesKnown, false);
     assert.equal(grepContext.result._meta.truncation.reason, "match_limit");
-    assert.match(grepContext.result.content[0].text, /\[truncated: match limit; 3 matches shown; more exist; narrow path\/include or raise maxMatches\]/);
+    assert.match(grepContext.result.content[0].text, /\[truncated: match limit; 3 matches shown; more exist; raise maxMatches or narrow pattern\/path\/include\]/);
 
     const limitedContext = await request("tools/call", {
       name: "sc-search",
@@ -1161,7 +1163,7 @@ try {
     assert.doesNotMatch(limitedContext.result.content[0].text, /before-two-a/);
     assert.doesNotMatch(limitedContext.result.content[0].text, /before-two-b/);
     assert.doesNotMatch(limitedContext.result.content[0].text, /match-two/);
-    assert.match(limitedContext.result.content[0].text, /\[truncated: match limit; 1 matches shown; more exist; narrow path\/include or raise maxMatches\]/);
+    assert.match(limitedContext.result.content[0].text, /\[truncated: match limit; 1 match shown; more exist; raise maxMatches or narrow pattern\/path\/include\]/);
 
     const byteLimitedSearch = await request("tools/call", {
       name: "sc-search",
@@ -1318,7 +1320,7 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
   assert.match(fakeAstPayload.text, /src\/example\.ts:5:3: target\(\)/);
   assert.match(fakeAstPayload.text, /> 5: target\(\);/);
   assert.match(fakeAstPayload.text, / 4: before\(\);/);
-  assert.match(fakeAstPayload.text, /\[truncated: match limit; 1 matches shown; more exist; narrow path\/include or raise maxMatches\]/);
+  assert.match(fakeAstPayload.text, /\[truncated: match limit; 1 match shown; more exist; raise maxMatches or narrow pattern\/path\/include\]/);
 
   const missingAstGrepRun = await runProcess(process.execPath, ["--input-type=module", "-e", `
     const { callTool } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "src", "tools.js")).href)});
@@ -1650,8 +1652,8 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
   const statsPayload = JSON.parse(statsRun.stdout.trim());
   assert.match(statsPayload.text, /Total: 3 calls · saved /);
   assert.match(statsPayload.text, /By tool:/);
-  assert.match(statsPayload.text, /run: 2 calls/);
-  assert.match(statsPayload.text, /fetch: 1 calls/);
+  assert.match(statsPayload.text, /sc-run: 2 calls/);
+  assert.match(statsPayload.text, /sc-fetch: 1 calls/);
   const parsedStats = statsPayload.meta;
   assert.equal(parsedStats.project, import.meta.dirname);
   assert.equal(parsedStats.calls, 3);
@@ -1724,12 +1726,12 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
   assert.equal(usageRun.code, 0, usageRun.stderr);
   const usagePayload = JSON.parse(usageRun.stdout.trim());
   assert.match(usagePayload.text, /Usage summary/);
-  assert.match(usagePayload.text, /run:/);
+  assert.match(usagePayload.text, /sc-run:/);
   assert.match(usagePayload.text, /git-history:/);
   assert.match(usagePayload.text, /sc-diff mode=history:/);
   assert.match(usagePayload.guidance, /Usage guidance/);
   assert.match(usagePayload.guidance, /sc-diff mode=history:/);
-  assert.match(usagePayload.guidance, /run: 3 dependencies commands/);
+  assert.match(usagePayload.guidance, /sc-run: 3 dependencies commands/);
   assert.doesNotMatch(usagePayload.guidance, /dependencies:/);
   assert.doesNotMatch(usagePayload.guidance, /infra_logs:/);
   assert.doesNotMatch(usagePayload.guidance, /size_or_find:/);

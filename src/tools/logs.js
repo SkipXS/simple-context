@@ -129,11 +129,12 @@ function extractLogBlocks(text, maxBlocks, contextLines, maxLines) {
   })));
   const prioritizedRanges = prioritizeLogRanges(ranges);
   const shownRanges = prioritizedRanges.slice(0, maxBlocks);
-  const output = ["Blocks sorted by severity, then line."];
+  const output = shownRanges.length > 1 ? ["Blocks sorted by severity, then line."] : [];
 
   for (const [rangeIndex, range] of shownRanges.entries()) {
     if (rangeIndex > 0) output.push("---");
-    output.push(`Block ${rangeIndex + 1} (lines ${range.start + 1}-${range.end + 1}):`);
+    const rangeLabel = formatRangeLabel(range);
+    output.push(shownRanges.length === 1 ? `${capitalize(rangeLabel)}:` : `Block ${rangeIndex + 1} (${rangeLabel}):`);
     output.push(...lines.slice(range.start, range.end + 1));
   }
 
@@ -148,6 +149,16 @@ function extractLogBlocks(text, maxBlocks, contextLines, maxLines) {
     truncationReason: limitedByBlocks ? "block_limit" : undefined,
     fallback: false,
   };
+}
+
+function formatRangeLabel(range) {
+  const start = range.start + 1;
+  const end = range.end + 1;
+  return start === end ? `line ${start}` : `lines ${start}-${end}`;
+}
+
+function capitalize(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function logsTruncationReason(extraction, formatted, result, maxLines, maxBytes) {

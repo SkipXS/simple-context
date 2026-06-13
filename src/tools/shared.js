@@ -130,7 +130,7 @@ function appendVisibleNotices(text, meta, maxBytes = Number.POSITIVE_INFINITY) {
     const notice = visibleTruncationNotice(meta.truncation.reason, meta.truncation.retryHint);
     const retryNotice = visibleRetryNotice(meta.truncation.retryHint);
     if (hasVisibleTruncationMarker(current)) {
-      if (retryNotice) current = appendBoundedNotice(current, retryNotice, meta, maxBytes);
+      if (retryNotice && !hasActionableTruncationMarker(current)) current = appendBoundedNotice(current, retryNotice, meta, maxBytes);
     } else if (!current.includes(notice) && !current.includes(`[truncated: ${meta.truncation.reason}`) && !current.includes(`[truncated: ${friendlyReason}`)) {
       current = appendBoundedNotice(current, notice, meta, maxBytes);
     }
@@ -141,6 +141,10 @@ function appendVisibleNotices(text, meta, maxBytes = Number.POSITIVE_INFINITY) {
 
 function hasVisibleTruncationMarker(text) {
   return /(^|\n)\[truncated:/i.test(text);
+}
+
+function hasActionableTruncationMarker(text) {
+  return /(^|\n)\[truncated:[^\n]*(?:raise|increase|narrow|retry|use|fetch|read smaller)/i.test(text);
 }
 
 function visibleTruncationNotice(reason, retryHint) {
@@ -180,9 +184,10 @@ function formatVisibleTruncationReason(reason) {
 function formatVisibleRetryHint(retryHint) {
   if (!retryHint) return "";
   return String(retryHint)
-    .replace(/^Increase /, "retry with higher ")
-    .replace(/^Fetch /, "retry with ")
-    .replace(/^Narrow /, "retry with narrower ")
+    .replace(/^Increase /, "raise ")
+    .replace(/^Fetch /, "fetch ")
+    .replace(/^Narrow /, "narrow ")
+    .replace(/^Use /, "use ")
     .replace(/\.$/, "")
     .replace(/\bor\b/g, "or");
 }

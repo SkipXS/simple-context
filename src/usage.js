@@ -242,7 +242,7 @@ function formatUsageReport(report) {
   ];
 
   lines.push("", "By tool:");
-  for (const summary of report.byTool.slice(0, 10)) lines.push(formatSummaryLine(summary));
+  for (const summary of report.byTool.slice(0, 10)) lines.push(formatToolSummaryLine(summary));
 
   if (report.byCommandKind.length > 0) {
     lines.push("", "Command kinds:");
@@ -259,6 +259,14 @@ function formatUsageReport(report) {
   }
 
   return lines.join("\n");
+}
+
+function displayToolName(toolName) {
+  return typeof toolName === "string" && !toolName.startsWith("sc-") ? `sc-${toolName}` : toolName;
+}
+
+function formatToolSummaryLine(summary) {
+  return formatSummaryLine({ ...summary, name: displayToolName(summary.name) });
 }
 
 function formatSummaryLine(summary) {

@@ -64,7 +64,7 @@ function formatGuidance(report) {
   if (noisyTools.length > 0) {
     lines.push("", "High-signal tool patterns:");
     for (const summary of noisyTools) {
-      lines.push(`${summary.name}: ${summary.calls} calls, ${summary.truncated} truncated, ${summary.failed} failed`);
+      lines.push(`${displayToolName(summary.name)}: ${summary.calls} calls, ${summary.truncated} truncated, ${summary.failed} failed`);
     }
   }
 
@@ -74,6 +74,10 @@ function formatGuidance(report) {
   lines.push("When _meta.truncated or _meta.response.truncated is true, retry with a narrower path/range/query before using raw shell output.");
 
   return lines.join("\n");
+}
+
+function displayToolName(toolName) {
+  return typeof toolName === "string" && !toolName.startsWith("sc-") ? `sc-${toolName}` : toolName;
 }
 
 async function statsResult(maxLines, maxBytes) {

@@ -12,7 +12,7 @@ const CONTEXT_SEPARATOR = "\x1e";
 const MAX_AST_CONTEXT_DISPLAY_LINES = 12;
 const AST_CONTEXT_HEAD_LINES = 8;
 const AST_CONTEXT_TAIL_LINES = 3;
-const searchTruncationHint = "Increase maxMatches/maxLines/maxBytes or narrow path/include.";
+const searchTruncationHint = "Increase maxMatches/maxLines/maxBytes or narrow pattern/path/include.";
 const AST_LANGUAGE_BY_EXTENSION = new Map([
   [".c", "c"],
   [".cc", "cpp"],
@@ -255,7 +255,8 @@ function normalizeRgMatchLine(line) {
 }
 
 function truncatedMatchesLine(shownMatches) {
-  return `[truncated: match limit; ${shownMatches} matches shown; more exist; narrow path/include or raise maxMatches]`;
+  const noun = shownMatches === 1 ? "match" : "matches";
+  return `[truncated: match limit; ${shownMatches} ${noun} shown; more exist; raise maxMatches or narrow pattern/path/include]`;
 }
 
 function searchTruncationReason({ matchLimited, result, formatted, maxLines, maxBytes }) {

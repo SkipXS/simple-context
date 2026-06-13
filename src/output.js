@@ -20,7 +20,7 @@ export function formatOutput(output, maxLines = MAX_LINES, maxBytes = DEFAULT_BY
   const limit = normalizeMaxLines(maxLines);
   const byteLimit = normalizeMaxBytes(maxBytes);
   const totalBytes = Buffer.byteLength(output, "utf8");
-  const lines = output.split("\n");
+  const lines = splitDisplayLines(output);
   const totalLines = lines.length;
 
   if (output === "") {
@@ -48,6 +48,12 @@ export function formatOutput(output, maxLines = MAX_LINES, maxBytes = DEFAULT_BY
 
   const text = Buffer.byteLength(summary, "utf8") <= byteLimit ? summary : formatByteSummary(output, totalBytes, byteLimit);
   return withSavings(text, totalLines, totalBytes, true);
+}
+
+function splitDisplayLines(output) {
+  const lines = output.split("\n");
+  if (lines.length > 1 && lines.at(-1) === "") lines.pop();
+  return lines;
 }
 
 function withSavings(text, totalLines, totalBytes, truncated) {

@@ -125,12 +125,22 @@ function formatBytes(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function formatNumber(value) {
+function formatCompactNumber(value) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 10_000) return `${Math.round(value / 1_000)}K`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
   return new Intl.NumberFormat("en-US").format(value);
 }
 
-function formatStatsLine(label, stats) {
-  return `${label}: ${stats.calls} calls · saved ${formatBytes(stats.savedBytes)} (${stats.savedPercent}%) · returned ${formatBytes(stats.returnedBytes)} / ${formatBytes(stats.totalBytes)} · ~${formatNumber(stats.estimatedTokensSaved)} tokens`;
+function displayToolName(toolName) {
+  return typeof toolName === "string" && !toolName.startsWith("sc-") ? `sc-${toolName}` : toolName;
+}
+
+function formatStatsLine(label, stats, { generated = false } = {}) {
+  if (generated && stats.savedBytes === 0) {
+    return `${label}: ${stats.calls} calls · bounded/generated output · returned ${formatBytes(stats.returnedBytes)}; raw baseline not estimated`;
+  }
+  return `${label}: ${stats.calls} calls · saved ${formatBytes(stats.savedBytes)}/${formatBytes(stats.totalBytes)} (${stats.savedPercent}%) · returned ${formatBytes(stats.returnedBytes)} · ~${formatCompactNumber(stats.estimatedTokensSaved)} tokens`;
 }
 
 export function formatStatsReport(stats) {
@@ -143,7 +153,9 @@ export function formatStatsReport(stats) {
 
   if (tools.length > 0) {
     lines.push("", "By tool:");
-    for (const [toolName, toolStats] of tools) lines.push(formatStatsLine(toolName, toolStats));
+    for (const [toolName, toolStats] of tools) {
+      lines.push(formatStatsLine(displayToolName(toolName), toolStats, { generated: toolName === "discover" }));
+    }
   }
 
   return lines.join("\n");
