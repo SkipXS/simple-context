@@ -1,5 +1,5 @@
-process.env.SIMPLE_CONTEXT_LIMITER_USAGE_LOG = "0";
-process.env.SIMPLE_CONTEXT_LIMITER_STATS = "0";
+process.env.SIMPLE_CONTEXT_USAGE_LOG = "0";
+process.env.SIMPLE_CONTEXT_STATS = "0";
 
 const assert = await import("node:assert/strict");
 const { spawn } = await import("node:child_process");
@@ -90,8 +90,8 @@ function spawnServer() {
     cwd: process.cwd(),
     env: {
       ...process.env,
-      SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "0",
-      SIMPLE_CONTEXT_LIMITER_STATS: "0",
+      SIMPLE_CONTEXT_USAGE_LOG: "0",
+      SIMPLE_CONTEXT_STATS: "0",
     },
     stdio: ["pipe", "pipe", "pipe"],
   });

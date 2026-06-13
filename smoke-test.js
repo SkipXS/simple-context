@@ -10,21 +10,21 @@ import { formatOutput } from "./src/output.js";
 import { errorData, runProcess, runProcessLines } from "./src/process.js";
 import { callTool } from "./src/tools.js";
 
-process.env.SIMPLE_CONTEXT_LIMITER_USAGE_LOG = "0";
-process.env.SIMPLE_CONTEXT_LIMITER_STATS = "0";
+process.env.SIMPLE_CONTEXT_USAGE_LOG = "0";
+process.env.SIMPLE_CONTEXT_STATS = "0";
 
 const child = spawn(process.execPath, ["server.js"], {
   cwd: import.meta.dirname,
   env: {
     ...process.env,
-    SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH: "1",
-    SIMPLE_CONTEXT_LIMITER_MAX_FETCH_BYTES: "1024",
-    SIMPLE_CONTEXT_LIMITER_MAX_READ_BYTES: "2048",
-    SIMPLE_CONTEXT_LIMITER_MAX_RPC_BATCH_CONCURRENCY: "2",
-    SIMPLE_CONTEXT_LIMITER_MAX_RPC_TOOL_CONCURRENCY: "2",
-    SIMPLE_CONTEXT_LIMITER_MAX_RPC_BATCH_SIZE: "4",
-    SIMPLE_CONTEXT_LIMITER_MAX_RPC_LINE_BYTES: "65536",
-    SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "0",
+    SIMPLE_CONTEXT_ALLOW_NON_HTTP_FETCH: "1",
+    SIMPLE_CONTEXT_MAX_FETCH_BYTES: "1024",
+    SIMPLE_CONTEXT_MAX_READ_BYTES: "2048",
+    SIMPLE_CONTEXT_MAX_RPC_BATCH_CONCURRENCY: "2",
+    SIMPLE_CONTEXT_MAX_RPC_TOOL_CONCURRENCY: "2",
+    SIMPLE_CONTEXT_MAX_RPC_BATCH_SIZE: "4",
+    SIMPLE_CONTEXT_MAX_RPC_LINE_BYTES: "65536",
+    SIMPLE_CONTEXT_USAGE_LOG: "0",
   },
   stdio: ["pipe", "pipe", "pipe"],
 });
@@ -116,7 +116,7 @@ function nodeEvalCommand(script) {
 }
 
 function configuredShell() {
-  return (process.env.SIMPLE_CONTEXT_LIMITER_SHELL ?? "").toLowerCase();
+  return (process.env.SIMPLE_CONTEXT_SHELL ?? "").toLowerCase();
 }
 
 function isPowerShellConfigured() {
@@ -227,7 +227,7 @@ try {
   assert.equal(lineLimitedProcess.truncated, true);
   assert.equal(lineLimitedProcess.lines.length, 10);
 
-  tempDir = await mkdtemp(join(tmpdir(), "simple-context-limiter-test-"));
+  tempDir = await mkdtemp(join(tmpdir(), "simple-context-test-"));
   const largeFile = join(tempDir, "large.txt");
   const largeOneLineFile = join(tempDir, "large-one-line.txt");
   const manyShortLinesFile = join(tempDir, "many-short-lines.txt");
@@ -283,7 +283,7 @@ try {
   assert.match(preInitCall.error.message, /requires initialize/);
 
   const init = await request("initialize", {});
-  assert.equal(init.result.serverInfo.name, "simple-context-limiter");
+  assert.equal(init.result.serverInfo.name, "simple-context");
   const invalidInitializeParams = await request("initialize", []);
   assert.equal(invalidInitializeParams.error.code, -32602);
   assert.match(invalidInitializeParams.error.message, /initialize params/);
@@ -293,7 +293,8 @@ try {
   const packageJson = JSON.parse(await readFile(join(import.meta.dirname, "package.json"), "utf8"));
   assert.equal(SERVER_VERSION, packageJson.version);
   assert.equal(init.result.serverInfo.version, packageJson.version);
-  assert.equal(packageJson.bin["simple-context-limiter"], "server.js");
+  assert.equal(packageJson.name, "simple-context");
+  assert.deepEqual(packageJson.bin, { "simple-context": "server.js" });
   assert.ok(packageJson.files.includes("server.js"));
   assert.ok(packageJson.files.includes("src/"));
   assert.match(await readFile(join(import.meta.dirname, "server.js"), "utf8"), /^#!\/usr\/bin\/env node/);
@@ -539,7 +540,7 @@ try {
     arguments: { mode: "summary", maxLines: 40 },
   });
   assert.ok(repoSummary.result, JSON.stringify(repoSummary));
-  assert.match(repoSummary.result.content[0].text, /simple-context-limiter/);
+  assert.match(repoSummary.result.content[0].text, /simple-context/);
 
   const outline = await request("tools/call", {
     name: "sc-discover",
@@ -669,8 +670,8 @@ try {
     timeout: 5_000,
     env: {
       ...process.env,
-      SIMPLE_CONTEXT_LIMITER_MAX_COMMAND_BYTES: "1024",
-      SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "0",
+      SIMPLE_CONTEXT_MAX_COMMAND_BYTES: "1024",
+      SIMPLE_CONTEXT_USAGE_LOG: "0",
     },
   });
   assert.equal(outputTooLargeRun.code, 0, outputTooLargeRun.stderr);
@@ -1267,7 +1268,7 @@ try {
       Path: "",
       HOME: join(tempDir, "missing-rg-home"),
       USERPROFILE: join(tempDir, "missing-rg-home"),
-      SIMPLE_CONTEXT_LIMITER_RG_PATH: "",
+      SIMPLE_CONTEXT_RG_PATH: "",
     },
   });
   assert.equal(missingRgRun.code, 0, missingRgRun.stderr);
@@ -1349,7 +1350,7 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
     timeout: 5_000,
     env: {
       ...process.env,
-      SIMPLE_CONTEXT_LIMITER_AST_GREP_PATH: fakeAstCommand,
+      SIMPLE_CONTEXT_AST_GREP_PATH: fakeAstCommand,
     },
   });
   assert.equal(fakeAstRun.code, 0, fakeAstRun.stderr);
@@ -1382,7 +1383,7 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
       Path: "",
       HOME: join(tempDir, "missing-ast-home"),
       USERPROFILE: join(tempDir, "missing-ast-home"),
-      SIMPLE_CONTEXT_LIMITER_AST_GREP_PATH: "",
+      SIMPLE_CONTEXT_AST_GREP_PATH: "",
     },
   });
   assert.equal(missingAstGrepRun.code, 0, missingAstGrepRun.stderr);
@@ -1464,7 +1465,7 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
     timeout: 5_000,
     env: {
       ...process.env,
-      SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH: "",
+      SIMPLE_CONTEXT_ALLOW_NON_HTTP_FETCH: "",
       HOME: join(tempDir, "blocked-protocol-home"),
       USERPROFILE: join(tempDir, "blocked-protocol-home"),
     },
@@ -1512,7 +1513,7 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
     const { callTool } = await import('./src/tools.js');
     const urls = Array.from({ length: 20 }, (_, i) => 'data:text/plain,' + encodeURIComponent('cache-race-' + i));
     await Promise.all(urls.map((url) => callTool('sc-fetch', { url, force: true })));
-    const cache = JSON.parse(await readFile(join(process.env.HOME, '.simple-context-limiter', 'cache.json'), 'utf8'));
+    const cache = JSON.parse(await readFile(join(process.env.HOME, '.simple-context', 'cache.json'), 'utf8'));
     console.log(Object.keys(cache).length);
   `], {
     cwd: import.meta.dirname,
@@ -1521,7 +1522,7 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
       ...process.env,
       HOME: join(tempDir, "cache-race-home"),
       USERPROFILE: join(tempDir, "cache-race-home"),
-      SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH: "1",
+      SIMPLE_CONTEXT_ALLOW_NON_HTTP_FETCH: "1",
     },
   });
   assert.equal(cacheRace.code, 0, cacheRace.stderr);
@@ -1542,9 +1543,9 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
       ...process.env,
       HOME: join(tempDir, "cache-home"),
       USERPROFILE: join(tempDir, "cache-home"),
-      SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH: "1",
-      SIMPLE_CONTEXT_LIMITER_CACHE_MAX_BYTES: "1000",
-      SIMPLE_CONTEXT_LIMITER_CACHE_MAX_ENTRIES: "10",
+      SIMPLE_CONTEXT_ALLOW_NON_HTTP_FETCH: "1",
+      SIMPLE_CONTEXT_CACHE_MAX_BYTES: "1000",
+      SIMPLE_CONTEXT_CACHE_MAX_ENTRIES: "10",
     },
   });
   assert.equal(cachePrune.code, 0, cachePrune.stderr);
@@ -1684,9 +1685,9 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
       ...process.env,
       HOME: join(tempDir, "stats-home"),
       USERPROFILE: join(tempDir, "stats-home"),
-      SIMPLE_CONTEXT_LIMITER_STATS: "1",
-      SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH: "1",
-      SIMPLE_CONTEXT_LIMITER_MAX_FETCH_BYTES: "1024",
+      SIMPLE_CONTEXT_STATS: "1",
+      SIMPLE_CONTEXT_ALLOW_NON_HTTP_FETCH: "1",
+      SIMPLE_CONTEXT_MAX_FETCH_BYTES: "1024",
     },
   });
   assert.equal(statsRun.code, 0, statsRun.stderr);
@@ -1717,10 +1718,10 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
     let projects = [];
     let usageExists = false;
     try {
-      const stats = JSON.parse(await readFile(join(process.env.HOME, '.simple-context-limiter', 'stats.json'), 'utf8'));
+      const stats = JSON.parse(await readFile(join(process.env.HOME, '.simple-context', 'stats.json'), 'utf8'));
       projects = Object.keys(stats.projects);
     } catch {}
-    try { await readFile(join(process.env.HOME, '.simple-context-limiter', 'usage.jsonl'), 'utf8'); usageExists = true; } catch {}
+    try { await readFile(join(process.env.HOME, '.simple-context', 'usage.jsonl'), 'utf8'); usageExists = true; } catch {}
     const report = await callTool('sc-usage', { mode: 'report' });
     console.log(JSON.stringify({ projects, usageExists, reportText: report.content[0].text, reportMeta: report._meta }));
   `], {
@@ -1752,7 +1753,7 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
     await callTool('sc-run', { command: ${JSON.stringify(isPowerShellConfigured() ? `& ${shellQuote(process.execPath)} -e "console.log('x'.repeat(50000))"` : `${shellQuote(process.execPath)} -e "console.log('x'.repeat(50000))"`)}, maxLines: 20 });
     const report = await callTool('sc-usage', { mode: 'report', maxEvents: 20 });
     const guidance = await callTool('sc-usage', { mode: 'guidance', maxEvents: 20 });
-    const usageLog = await readFile(join(process.env.HOME, '.simple-context-limiter', 'usage.jsonl'), 'utf8');
+    const usageLog = await readFile(join(process.env.HOME, '.simple-context', 'usage.jsonl'), 'utf8');
     console.log(JSON.stringify({ text: report.content[0].text, guidance: guidance.content[0].text, meta: report._meta, guidanceMeta: guidance._meta, usageLog }));
   `], {
     cwd: import.meta.dirname,
@@ -1761,7 +1762,7 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
       ...process.env,
       HOME: join(tempDir, "usage-home"),
       USERPROFILE: join(tempDir, "usage-home"),
-      SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "1",
+      SIMPLE_CONTEXT_USAGE_LOG: "1",
     },
   });
   assert.equal(usageRun.code, 0, usageRun.stderr);
@@ -1786,7 +1787,7 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
     import { mkdir, writeFile } from 'node:fs/promises';
     import { join } from 'node:path';
     const { callTool } = await import('./src/tools.js');
-    const logDir = join(process.env.HOME, '.simple-context-limiter');
+    const logDir = join(process.env.HOME, '.simple-context');
     await mkdir(logDir, { recursive: true });
     await writeFile(join(logDir, 'usage.jsonl'), JSON.stringify({
       ts: Date.now(),
@@ -1809,7 +1810,7 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
       ...process.env,
       HOME: join(tempDir, "usage-project-scope-home"),
       USERPROFILE: join(tempDir, "usage-project-scope-home"),
-      SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "1",
+      SIMPLE_CONTEXT_USAGE_LOG: "1",
     },
   });
   assert.equal(usageProjectScopeRun.code, 0, usageProjectScopeRun.stderr);
@@ -1826,7 +1827,7 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
     const { callTool } = await import('./src/tools.js');
     const command = ${JSON.stringify(isPowerShellConfigured() ? `& ${shellQuote(process.execPath)} -e "console.log('ok')"` : `${shellQuote(process.execPath)} -e "console.log('ok')"`)};
     for (let i = 0; i < 40; i++) await callTool('sc-run', { command });
-    const file = join(process.env.HOME, '.simple-context-limiter', 'usage.jsonl');
+    const file = join(process.env.HOME, '.simple-context', 'usage.jsonl');
     const fileStat = await stat(file);
     const text = await readFile(file, 'utf8');
     const valid = text.split(String.fromCharCode(10)).filter(Boolean).every((line) => {
@@ -1840,8 +1841,8 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
       ...process.env,
       HOME: join(tempDir, "usage-prune-home"),
       USERPROFILE: join(tempDir, "usage-prune-home"),
-      SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "1",
-      SIMPLE_CONTEXT_LIMITER_USAGE_LOG_MAX_BYTES: "2048",
+      SIMPLE_CONTEXT_USAGE_LOG: "1",
+      SIMPLE_CONTEXT_USAGE_LOG_MAX_BYTES: "2048",
     },
   });
   assert.equal(usagePruneRun.code, 0, usagePruneRun.stderr);
@@ -1854,7 +1855,7 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
     import { join } from 'node:path';
     const { callTool } = await import('./src/tools.js');
     await callTool('sc-run', { command: ${JSON.stringify(isPowerShellConfigured() ? `& ${shellQuote(process.execPath)} -e "console.log('ok')"` : `${shellQuote(process.execPath)} -e "console.log('ok')"`)} });
-    try { await readFile(join(process.env.HOME, '.simple-context-limiter', 'usage.jsonl'), 'utf8'); console.log('exists'); } catch { console.log('missing'); }
+    try { await readFile(join(process.env.HOME, '.simple-context', 'usage.jsonl'), 'utf8'); console.log('exists'); } catch { console.log('missing'); }
   `], {
     cwd: import.meta.dirname,
     timeout: 5_000,
@@ -1862,7 +1863,7 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
       ...process.env,
       HOME: join(tempDir, "usage-disabled-home"),
       USERPROFILE: join(tempDir, "usage-disabled-home"),
-      SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "0",
+      SIMPLE_CONTEXT_USAGE_LOG: "0",
     },
   });
   assert.equal(usageOptOutRun.code, 0, usageOptOutRun.stderr);

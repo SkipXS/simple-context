@@ -52,9 +52,9 @@ if (!Object.hasOwn(commands, scriptName)) {
 
 if (!hasSourceCheckoutFiles()) {
   console.log(
-    `simple-context-limiter: npm script "${scriptName}" is a source-checkout validation command; `
+    `simple-context: npm script "${scriptName}" is a source-checkout validation command; `
     + "the published package intentionally includes only runtime files and documentation. "
-    + "Use the simple-context-limiter bin entrypoint to validate an installed package.",
+    + "Use the simple-context bin entrypoint to validate an installed package.",
   );
   process.exit(0);
 }

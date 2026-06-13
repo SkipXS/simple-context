@@ -93,11 +93,11 @@ export function withResponseMeta(meta) {
 }
 
 export function validateCommandPolicy(command, toolName) {
-  if (DISABLE_COMMAND_TOOLS) invalidParams(`${toolName} is disabled by SIMPLE_CONTEXT_LIMITER_DISABLE_COMMAND_TOOLS`);
+  if (DISABLE_COMMAND_TOOLS) invalidParams(`${toolName} is disabled by SIMPLE_CONTEXT_DISABLE_COMMAND_TOOLS`);
   if (COMMAND_ALLOWLIST.length === 0) return;
 
   const allowed = COMMAND_ALLOWLIST.includes(command);
-  if (!allowed) invalidParams(`${toolName} command is not allowed by SIMPLE_CONTEXT_LIMITER_COMMAND_ALLOWLIST`);
+  if (!allowed) invalidParams(`${toolName} command is not allowed by SIMPLE_CONTEXT_COMMAND_ALLOWLIST`);
 }
 
 export async function assertPathAllowed(filePath, toolName) {
@@ -108,7 +108,7 @@ export async function assertPathAllowed(filePath, toolName) {
   const allowed = await Promise.all(PATH_ROOTS.map(async (root) => isInsidePath(candidate, await realPathForPolicy(root))));
   if (allowed.some(Boolean)) return;
 
-  invalidParams(`${toolName} path is outside SIMPLE_CONTEXT_LIMITER_PATH_ROOTS: ${filePath}`);
+  invalidParams(`${toolName} path is outside SIMPLE_CONTEXT_PATH_ROOTS: ${filePath}`);
 }
 
 async function realPathForPolicy(filePath) {

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve simple-context-limiter.
+Thanks for helping improve simple-context.
 
 ## Development Setup
 

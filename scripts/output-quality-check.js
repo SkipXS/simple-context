@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-process.env.SIMPLE_CONTEXT_LIMITER_USAGE_LOG = "0";
-process.env.SIMPLE_CONTEXT_LIMITER_STATS = "0";
+process.env.SIMPLE_CONTEXT_USAGE_LOG = "0";
+process.env.SIMPLE_CONTEXT_STATS = "0";
 
 const assert = await import("node:assert/strict");
 const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
@@ -105,7 +105,7 @@ function assertFormatterGoldens() {
 }
 
 function configuredShell() {
-  return (process.env.SIMPLE_CONTEXT_LIMITER_SHELL ?? "").toLowerCase();
+  return (process.env.SIMPLE_CONTEXT_SHELL ?? "").toLowerCase();
 }
 
 function isBashConfigured() {
@@ -146,7 +146,7 @@ function normalizePath(text, filePath, replacement) {
 async function assertToolOutputGoldens() {
   let tempDir;
   try {
-    tempDir = await mkdtemp(join(tmpdir(), "simple-context-limiter-quality-"));
+    tempDir = await mkdtemp(join(tmpdir(), "simple-context-quality-"));
 
     const logScript = join(tempDir, "log-case.mjs");
     await writeFile(logScript, [

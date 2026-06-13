@@ -99,7 +99,7 @@ let tempDir;
 let tarballPath;
 
 try {
-  tempDir = await mkdtemp(join(tmpdir(), "simple-context-limiter-pack-"));
+  tempDir = await mkdtemp(join(tmpdir(), "simple-context-pack-"));
   const pack = await run(npmCommand, [...npmArgsPrefix, "pack", "--ignore-scripts", "--json"], { shell: npmUsesShell });
   const packed = JSON.parse(pack.stdout);
   const fileNames = new Set(packed[0].files.map((file) => file.path));
@@ -133,16 +133,16 @@ try {
 
   await run(npmCommand, [...npmArgsPrefix, "install", "--ignore-scripts", "--no-audit", "--no-fund", tarballPath], { cwd: tempDir, shell: npmUsesShell });
 
-  const installedPackageDir = join(tempDir, "node_modules", "simple-context-limiter");
+  const installedPackageDir = join(tempDir, "node_modules", "simple-context");
   const installedCheck = await run(npmCommand, [...npmArgsPrefix, "run", "check"], { cwd: installedPackageDir, shell: npmUsesShell });
   assert.match(installedCheck.stdout, /source-checkout validation command/);
 
-  const child = spawn(npmCommand, [...npmArgsPrefix, "exec", "--", "simple-context-limiter"], {
+  const child = spawn(npmCommand, [...npmArgsPrefix, "exec", "--", "simple-context"], {
     cwd: tempDir,
     env: {
       ...process.env,
-      SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "0",
-      SIMPLE_CONTEXT_LIMITER_STATS: "0",
+      SIMPLE_CONTEXT_USAGE_LOG: "0",
+      SIMPLE_CONTEXT_STATS: "0",
     },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -157,7 +157,7 @@ try {
     const initialize = responses.find((response) => response.id === 1);
     const toolsList = responses.find((response) => response.id === 2);
 
-    assert.equal(initialize.result.serverInfo.name, "simple-context-limiter");
+    assert.equal(initialize.result.serverInfo.name, "simple-context");
     assert.equal(toolsList.result.tools.length, 8);
     assert.deepEqual(toolsList.result.tools.map((tool) => tool.name), [
       "sc-run",

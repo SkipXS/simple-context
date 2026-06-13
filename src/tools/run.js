@@ -49,6 +49,6 @@ export async function runTool(args) {
 
 function runTruncationHint(outputTooLarge) {
   return outputTooLarge
-    ? "Use a narrower command or raise SIMPLE_CONTEXT_LIMITER_MAX_COMMAND_BYTES."
+    ? "Use a narrower command or raise SIMPLE_CONTEXT_MAX_COMMAND_BYTES."
     : "Increase maxLines/maxBytes.";
 }

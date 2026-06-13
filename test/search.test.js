@@ -1,5 +1,5 @@
-process.env.SIMPLE_CONTEXT_LIMITER_USAGE_LOG = "0";
-process.env.SIMPLE_CONTEXT_LIMITER_STATS = "0";
+process.env.SIMPLE_CONTEXT_USAGE_LOG = "0";
+process.env.SIMPLE_CONTEXT_STATS = "0";
 
 const assert = await import("node:assert/strict");
 const fs = await import("node:fs/promises");
@@ -216,24 +216,24 @@ async function writeFakeAstGrep(dir) {
 }
 
 async function withFakeAstGrep(fakeSg, options, callback) {
-  const previousPath = process.env.SIMPLE_CONTEXT_LIMITER_AST_GREP_PATH;
-  const previousMode = process.env.SIMPLE_CONTEXT_LIMITER_FAKE_AST_MODE;
-  const previousGlob = process.env.SIMPLE_CONTEXT_LIMITER_FAKE_AST_EXPECT_GLOB;
-  const previousLang = process.env.SIMPLE_CONTEXT_LIMITER_FAKE_AST_EXPECT_LANG;
-  const previousContext = process.env.SIMPLE_CONTEXT_LIMITER_FAKE_AST_EXPECT_CONTEXT;
+  const previousPath = process.env.SIMPLE_CONTEXT_AST_GREP_PATH;
+  const previousMode = process.env.SIMPLE_CONTEXT_FAKE_AST_MODE;
+  const previousGlob = process.env.SIMPLE_CONTEXT_FAKE_AST_EXPECT_GLOB;
+  const previousLang = process.env.SIMPLE_CONTEXT_FAKE_AST_EXPECT_LANG;
+  const previousContext = process.env.SIMPLE_CONTEXT_FAKE_AST_EXPECT_CONTEXT;
   try {
-    process.env.SIMPLE_CONTEXT_LIMITER_AST_GREP_PATH = fakeSg;
-    process.env.SIMPLE_CONTEXT_LIMITER_FAKE_AST_MODE = options.mode;
-    setOptionalEnv("SIMPLE_CONTEXT_LIMITER_FAKE_AST_EXPECT_GLOB", options.expectedGlob);
-    setOptionalEnv("SIMPLE_CONTEXT_LIMITER_FAKE_AST_EXPECT_LANG", options.expectedLang);
-    setOptionalEnv("SIMPLE_CONTEXT_LIMITER_FAKE_AST_EXPECT_CONTEXT", options.expectedContext);
+    process.env.SIMPLE_CONTEXT_AST_GREP_PATH = fakeSg;
+    process.env.SIMPLE_CONTEXT_FAKE_AST_MODE = options.mode;
+    setOptionalEnv("SIMPLE_CONTEXT_FAKE_AST_EXPECT_GLOB", options.expectedGlob);
+    setOptionalEnv("SIMPLE_CONTEXT_FAKE_AST_EXPECT_LANG", options.expectedLang);
+    setOptionalEnv("SIMPLE_CONTEXT_FAKE_AST_EXPECT_CONTEXT", options.expectedContext);
     return await callback();
   } finally {
-    restoreEnv("SIMPLE_CONTEXT_LIMITER_AST_GREP_PATH", previousPath);
-    restoreEnv("SIMPLE_CONTEXT_LIMITER_FAKE_AST_MODE", previousMode);
-    restoreEnv("SIMPLE_CONTEXT_LIMITER_FAKE_AST_EXPECT_GLOB", previousGlob);
-    restoreEnv("SIMPLE_CONTEXT_LIMITER_FAKE_AST_EXPECT_LANG", previousLang);
-    restoreEnv("SIMPLE_CONTEXT_LIMITER_FAKE_AST_EXPECT_CONTEXT", previousContext);
+    restoreEnv("SIMPLE_CONTEXT_AST_GREP_PATH", previousPath);
+    restoreEnv("SIMPLE_CONTEXT_FAKE_AST_MODE", previousMode);
+    restoreEnv("SIMPLE_CONTEXT_FAKE_AST_EXPECT_GLOB", previousGlob);
+    restoreEnv("SIMPLE_CONTEXT_FAKE_AST_EXPECT_LANG", previousLang);
+    restoreEnv("SIMPLE_CONTEXT_FAKE_AST_EXPECT_CONTEXT", previousContext);
   }
 }
 
@@ -258,22 +258,22 @@ if (args[0] !== "run") {
   console.error("unexpected fake ast-grep command: " + args.join(" "));
   process.exit(2);
 }
-const expectedGlob = process.env.SIMPLE_CONTEXT_LIMITER_FAKE_AST_EXPECT_GLOB;
+const expectedGlob = process.env.SIMPLE_CONTEXT_FAKE_AST_EXPECT_GLOB;
 if (expectedGlob && !hasFlagValue("--globs", expectedGlob)) {
   console.error("missing expected --globs " + expectedGlob + " in " + args.join(" "));
   process.exit(3);
 }
-const expectedLang = process.env.SIMPLE_CONTEXT_LIMITER_FAKE_AST_EXPECT_LANG;
+const expectedLang = process.env.SIMPLE_CONTEXT_FAKE_AST_EXPECT_LANG;
 if (expectedLang && !hasFlagValue("--lang", expectedLang)) {
   console.error("missing expected --lang " + expectedLang + " in " + args.join(" "));
   process.exit(3);
 }
-const expectedContext = process.env.SIMPLE_CONTEXT_LIMITER_FAKE_AST_EXPECT_CONTEXT;
+const expectedContext = process.env.SIMPLE_CONTEXT_FAKE_AST_EXPECT_CONTEXT;
 if (expectedContext && !hasFlagValue("--context", expectedContext)) {
   console.error("missing expected --context " + expectedContext + " in " + args.join(" "));
   process.exit(3);
 }
-const mode = process.env.SIMPLE_CONTEXT_LIMITER_FAKE_AST_MODE || "happy";
+const mode = process.env.SIMPLE_CONTEXT_FAKE_AST_MODE || "happy";
 if (mode === "error") {
   console.error("fake ast-grep error");
   process.exit(2);

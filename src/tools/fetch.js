@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { ALLOW_NON_HTTP_FETCH, CACHE_TTL_MS, DEFAULT_BYTES, FETCH_PUBLIC_ONLY, MAX_BYTES, MAX_FETCH_BYTES, MAX_LINES, SERVER_VERSION } from "../constants.js";
+import { ALLOW_NON_HTTP_FETCH, CACHE_TTL_MS, DEFAULT_BYTES, envValue, FETCH_PUBLIC_ONLY, MAX_BYTES, MAX_FETCH_BYTES, MAX_LINES, SERVER_NAME, SERVER_VERSION } from "../constants.js";
 import { getCache, updateCache } from "../cache.js";
 import { formatOutput } from "../output.js";
 import { recordStats } from "../stats.js";
@@ -69,7 +69,7 @@ async function fetchUrl(url, { force = false, cache: cacheArg, bodyMaxBytes = MA
     invalidParams("fetch requires a valid URL");
   }
   if (!ALLOW_NON_HTTP_FETCH && parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    invalidParams("fetch only allows http and https URLs by default; set SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH=1 to allow other schemes");
+    invalidParams("fetch only allows http and https URLs by default; set SIMPLE_CONTEXT_ALLOW_NON_HTTP_FETCH=1 to allow other schemes");
   }
 
   if (FETCH_PUBLIC_ONLY) await validatePublicFetchUrl(url);
@@ -198,7 +198,7 @@ async function fetchWithPolicy(url) {
 async function fetchOnce(url, options = {}) {
   try {
     return await fetch(url, {
-      headers: { "User-Agent": `simple-context-limiter/${SERVER_VERSION}` },
+      headers: { "User-Agent": `${SERVER_NAME}/${SERVER_VERSION}` },
       signal: AbortSignal.timeout(30_000),
       ...options,
     });
@@ -214,7 +214,7 @@ async function fetchOnce(url, options = {}) {
 async function validatePublicFetchUrl(url) {
   const reason = await fetchCacheSkipReason(url);
   if (!reason) return;
-  const error = new Error(`Fetch blocked by SIMPLE_CONTEXT_LIMITER_FETCH_PUBLIC_ONLY: ${reason}`);
+  const error = new Error(`Fetch blocked by SIMPLE_CONTEXT_FETCH_PUBLIC_ONLY: ${reason}`);
   error.code = -32602;
   error.url = url;
   throw error;
@@ -225,7 +225,7 @@ function isRedirectStatus(status) {
 }
 
 function fetchCacheEnvMode() {
-  const value = process.env.SIMPLE_CONTEXT_LIMITER_FETCH_CACHE;
+  const value = envValue("FETCH_CACHE");
   if (/^(0|false|no|off)$/i.test(value ?? "")) return "off";
   if (/^(all|private)$/i.test(value ?? "")) return "all";
   return "public";

@@ -1,6 +1,6 @@
-process.env.SIMPLE_CONTEXT_LIMITER_STATS = "0";
-process.env.SIMPLE_CONTEXT_LIMITER_USAGE_LOG = "1";
-delete process.env.SIMPLE_CONTEXT_LIMITER_DISABLE_USAGE_LOG;
+process.env.SIMPLE_CONTEXT_STATS = "0";
+process.env.SIMPLE_CONTEXT_USAGE_LOG = "1";
+delete process.env.SIMPLE_CONTEXT_DISABLE_USAGE_LOG;
 
 const tempRoot = await import("node:os").then((os) => os.tmpdir());
 const fs = await import("node:fs/promises");

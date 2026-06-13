@@ -1,5 +1,5 @@
-process.env.SIMPLE_CONTEXT_LIMITER_USAGE_LOG = "0";
-process.env.SIMPLE_CONTEXT_LIMITER_STATS = "0";
+process.env.SIMPLE_CONTEXT_USAGE_LOG = "0";
+process.env.SIMPLE_CONTEXT_STATS = "0";
 
 const tempRoot = await import("node:os").then((os) => os.tmpdir());
 const fs = await import("node:fs/promises");
@@ -21,12 +21,12 @@ const servers = new Set();
 
 await describe("sc-fetch", async () => {
   beforeEach(async () => {
-    delete process.env.SIMPLE_CONTEXT_LIMITER_FETCH_CACHE;
+    delete process.env.SIMPLE_CONTEXT_FETCH_CACHE;
     await fs.rm(path.dirname(CACHE_FILE), { recursive: true, force: true });
   });
 
   afterEach(async () => {
-    delete process.env.SIMPLE_CONTEXT_LIMITER_FETCH_CACHE;
+    delete process.env.SIMPLE_CONTEXT_FETCH_CACHE;
     await Promise.all([...servers].map((server) => closeServer(server)));
     servers.clear();
   });
@@ -117,7 +117,7 @@ await describe("sc-fetch", async () => {
       contentType: "text/plain; charset=utf-8",
       body: `env-cached-secret-${++envHits}`,
     }));
-    process.env.SIMPLE_CONTEXT_LIMITER_FETCH_CACHE = "all";
+    process.env.SIMPLE_CONTEXT_FETCH_CACHE = "all";
     const envFirst = await callTool("sc-fetch", { url: envServer.url });
     const envSecond = await callTool("sc-fetch", { url: envServer.url });
 
@@ -199,9 +199,9 @@ await describe("sc-fetch", async () => {
     }));
 
     const script = `
-      process.env.SIMPLE_CONTEXT_LIMITER_USAGE_LOG = "0";
-      process.env.SIMPLE_CONTEXT_LIMITER_STATS = "0";
-      process.env.SIMPLE_CONTEXT_LIMITER_MAX_FETCH_BYTES = "2";
+      process.env.SIMPLE_CONTEXT_USAGE_LOG = "0";
+      process.env.SIMPLE_CONTEXT_STATS = "0";
+      process.env.SIMPLE_CONTEXT_MAX_FETCH_BYTES = "2";
       const { callTool } = await import("./src/tools.js");
       const result = await callTool("sc-fetch", { url: ${JSON.stringify(url)} });
       process.stdout.write(JSON.stringify(result.content[0].text));

@@ -1,5 +1,5 @@
-process.env.SIMPLE_CONTEXT_LIMITER_USAGE_LOG = "0";
-process.env.SIMPLE_CONTEXT_LIMITER_STATS = "0";
+process.env.SIMPLE_CONTEXT_USAGE_LOG = "0";
+process.env.SIMPLE_CONTEXT_STATS = "0";
 
 const assert = await import("node:assert/strict");
 const { spawn } = await import("node:child_process");
@@ -12,11 +12,11 @@ await describe("server backpressure", async () => {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "0",
-        SIMPLE_CONTEXT_LIMITER_STATS: "0",
-        SIMPLE_CONTEXT_LIMITER_MAX_RPC_TOOL_CONCURRENCY: "1",
-        SIMPLE_CONTEXT_LIMITER_MAX_RPC_TOOL_QUEUE: "10",
-        SIMPLE_CONTEXT_LIMITER_MAX_RPC_PENDING_REQUESTS: "1",
+        SIMPLE_CONTEXT_USAGE_LOG: "0",
+        SIMPLE_CONTEXT_STATS: "0",
+        SIMPLE_CONTEXT_MAX_RPC_TOOL_CONCURRENCY: "1",
+        SIMPLE_CONTEXT_MAX_RPC_TOOL_QUEUE: "10",
+        SIMPLE_CONTEXT_MAX_RPC_PENDING_REQUESTS: "1",
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -62,11 +62,11 @@ await describe("server backpressure", async () => {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        SIMPLE_CONTEXT_LIMITER_USAGE_LOG: "0",
-        SIMPLE_CONTEXT_LIMITER_STATS: "0",
-        SIMPLE_CONTEXT_LIMITER_MAX_RPC_TOOL_CONCURRENCY: "1",
-        SIMPLE_CONTEXT_LIMITER_MAX_RPC_TOOL_QUEUE: "1",
-        SIMPLE_CONTEXT_LIMITER_MAX_RPC_PENDING_REQUESTS: "20",
+        SIMPLE_CONTEXT_USAGE_LOG: "0",
+        SIMPLE_CONTEXT_STATS: "0",
+        SIMPLE_CONTEXT_MAX_RPC_TOOL_CONCURRENCY: "1",
+        SIMPLE_CONTEXT_MAX_RPC_TOOL_QUEUE: "1",
+        SIMPLE_CONTEXT_MAX_RPC_PENDING_REQUESTS: "20",
       },
       stdio: ["pipe", "pipe", "pipe"],
     });

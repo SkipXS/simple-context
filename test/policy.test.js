@@ -1,5 +1,5 @@
-process.env.SIMPLE_CONTEXT_LIMITER_USAGE_LOG = "0";
-process.env.SIMPLE_CONTEXT_LIMITER_STATS = "0";
+process.env.SIMPLE_CONTEXT_USAGE_LOG = "0";
+process.env.SIMPLE_CONTEXT_STATS = "0";
 
 const assert = await import("node:assert/strict");
 const fs = await import("node:fs/promises");
@@ -24,7 +24,7 @@ await describe("strict environment policies", async () => {
         }
       }
       process.stdout.write(JSON.stringify(results));
-    `, { SIMPLE_CONTEXT_LIMITER_DISABLE_COMMAND_TOOLS: "1" });
+    `, { SIMPLE_CONTEXT_DISABLE_COMMAND_TOOLS: "1" });
 
     const results = JSON.parse(output);
     assert.deepEqual(results.map((entry) => entry.ok), [false, false]);
@@ -47,7 +47,7 @@ await describe("strict environment policies", async () => {
         blocked = { ok: false, code: error.code, message: error.message };
       }
       process.stdout.write(JSON.stringify({ allowedRun: allowedRun.content[0].text, allowedLogs: allowedLogs.content[0].text, blocked }));
-    `, { SIMPLE_CONTEXT_LIMITER_COMMAND_ALLOWLIST: allowedCommand });
+    `, { SIMPLE_CONTEXT_COMMAND_ALLOWLIST: allowedCommand });
 
     const result = JSON.parse(output);
     assert.match(result.allowedRun, /^v?\d+\.\d+\.\d+/);
@@ -68,7 +68,7 @@ await describe("strict environment policies", async () => {
       } catch (error) {
         process.stdout.write(JSON.stringify({ ok: false, code: error.code, message: error.message }));
       }
-    `, { SIMPLE_CONTEXT_LIMITER_COMMAND_ALLOWLIST: allowedCommand });
+    `, { SIMPLE_CONTEXT_COMMAND_ALLOWLIST: allowedCommand });
 
     const result = JSON.parse(output);
     assert.equal(result.ok, false);
@@ -80,7 +80,7 @@ await describe("strict environment policies", async () => {
     const testHome = await fs.mkdtemp(path.join(os.tmpdir(), "scl-policy-fetch-home-"));
     const url = "http://127.0.0.1:1/secret";
     const key = createHash("sha256").update(url).digest("hex");
-    const cacheDir = path.join(testHome, ".simple-context-limiter");
+    const cacheDir = path.join(testHome, ".simple-context");
     await fs.mkdir(cacheDir, { recursive: true });
     await fs.writeFile(path.join(cacheDir, "cache.json"), JSON.stringify({
       [key]: {
@@ -109,8 +109,8 @@ await describe("strict environment policies", async () => {
     `, {
       HOME: testHome,
       USERPROFILE: testHome,
-      SIMPLE_CONTEXT_LIMITER_FETCH_PUBLIC_ONLY: "1",
-      SIMPLE_CONTEXT_LIMITER_FETCH_CACHE: "all",
+      SIMPLE_CONTEXT_FETCH_PUBLIC_ONLY: "1",
+      SIMPLE_CONTEXT_FETCH_CACHE: "all",
     });
 
     const result = JSON.parse(output);
@@ -128,7 +128,7 @@ await describe("strict environment policies", async () => {
       } catch (error) {
         process.stdout.write(JSON.stringify({ ok: false, code: error.code, message: error.message, url: error.url }));
       }
-    `, { SIMPLE_CONTEXT_LIMITER_FETCH_PUBLIC_ONLY: "1" });
+    `, { SIMPLE_CONTEXT_FETCH_PUBLIC_ONLY: "1" });
 
     const result = JSON.parse(output);
     assert.equal(result.ok, false);
@@ -150,7 +150,7 @@ await describe("strict environment policies", async () => {
       } catch (error) {
         process.stdout.write(JSON.stringify({ ok: false, code: error.code, message: error.message }));
       }
-    `, { SIMPLE_CONTEXT_LIMITER_PATH_ROOTS: allowedRoot }, { cwd });
+    `, { SIMPLE_CONTEXT_PATH_ROOTS: allowedRoot }, { cwd });
 
     const result = JSON.parse(output);
     assert.equal(result.ok, false);
@@ -184,7 +184,7 @@ await describe("strict environment policies", async () => {
         }
       }
       process.stdout.write(JSON.stringify({ allowed: allowed.content[0].text, denied }));
-    `, { SIMPLE_CONTEXT_LIMITER_PATH_ROOTS: root });
+    `, { SIMPLE_CONTEXT_PATH_ROOTS: root });
 
     const result = JSON.parse(output);
     assert.match(result.allowed, /inside/);
@@ -201,8 +201,8 @@ async function execNode(script, env = {}, options = {}) {
     execFile(
       process.execPath,
       ["--input-type=module", "--eval", `
-        process.env.SIMPLE_CONTEXT_LIMITER_USAGE_LOG = "0";
-        process.env.SIMPLE_CONTEXT_LIMITER_STATS = "0";
+        process.env.SIMPLE_CONTEXT_USAGE_LOG = "0";
+        process.env.SIMPLE_CONTEXT_STATS = "0";
         ${script}
       `],
       {

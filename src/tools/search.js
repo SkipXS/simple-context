@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { DEFAULT_BYTES, MAX_BYTES, MAX_LINES, MAX_READ_BYTES, RG_NAME } from "../constants.js";
+import { DEFAULT_BYTES, envValue, MAX_BYTES, MAX_LINES, MAX_READ_BYTES, RG_NAME } from "../constants.js";
 import { formatOutput } from "../output.js";
 import { commandError, runProcessLines } from "../process.js";
 import { recordStats } from "../stats.js";
@@ -60,7 +60,8 @@ async function isExecutable(filePath) {
 export async function findRg() {
   const candidates = [];
 
-  if (process.env.SIMPLE_CONTEXT_LIMITER_RG_PATH) candidates.push(process.env.SIMPLE_CONTEXT_LIMITER_RG_PATH);
+  const rgPath = envValue("RG_PATH");
+  if (rgPath) candidates.push(rgPath);
 
   for (const entry of pathEntries()) candidates.push(path.join(entry, RG_NAME));
 
@@ -94,7 +95,8 @@ async function findAstGrepUncached() {
   const names = process.platform === "win32" ? ["sg.exe", "ast-grep.exe", "sg.cmd", "ast-grep.cmd"] : ["sg", "ast-grep"];
   const candidates = [];
 
-  if (process.env.SIMPLE_CONTEXT_LIMITER_AST_GREP_PATH) candidates.push(process.env.SIMPLE_CONTEXT_LIMITER_AST_GREP_PATH);
+  const astGrepPath = envValue("AST_GREP_PATH");
+  if (astGrepPath) candidates.push(astGrepPath);
   for (const entry of pathEntries()) {
     for (const name of names) candidates.push(path.join(entry, name));
   }
@@ -112,7 +114,7 @@ async function findAstGrepUncached() {
 function astGrepDiscoveryKey() {
   return [
     process.platform,
-    process.env.SIMPLE_CONTEXT_LIMITER_AST_GREP_PATH ?? "",
+    envValue("AST_GREP_PATH") ?? "",
     process.env.PATH ?? "",
     process.env.Path ?? "",
   ].join("\0");
@@ -169,7 +171,7 @@ export async function searchTool(args) {
   const rg = await findRg();
   if (!rg) {
     const error = new Error(
-      "ripgrep was not found. Install rg, set SIMPLE_CONTEXT_LIMITER_RG_PATH, or run from OpenCode/Pi after their rg helper has been installed.",
+      "ripgrep was not found. Install rg, set SIMPLE_CONTEXT_RG_PATH, or run from OpenCode/Pi after their rg helper has been installed.",
     );
     error.code = -32000;
     throw error;
@@ -319,7 +321,7 @@ async function astSearchTool(pattern, searchPath, include, language, contextLine
   const sg = await findAstGrep();
   if (!sg) {
     const error = new Error(
-      "ast-grep was not found. Install @ast-grep/cli, install sg/ast-grep on PATH, or set SIMPLE_CONTEXT_LIMITER_AST_GREP_PATH.",
+      "ast-grep was not found. Install @ast-grep/cli, install sg/ast-grep on PATH, or set SIMPLE_CONTEXT_AST_GREP_PATH.",
     );
     error.code = -32000;
     throw error;
