@@ -2,7 +2,7 @@ import { DEFAULT_COMMAND_TIMEOUT_MS, MAX_BYTES, MAX_COMMAND_BYTES, MAX_COMMAND_T
 import { formatOutput } from "../output.js";
 import { runCommand } from "../process.js";
 import { recordStats } from "../stats.js";
-import { formatTruncationReason, invalidParams, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
+import { formatTruncationReason, invalidParams, toolTextResult, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
 
 export async function runTool(args) {
   const { command, maxLines = MAX_LINES, maxBytes = MAX_BYTES, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS } = args ?? {};
@@ -43,8 +43,5 @@ export async function runTool(args) {
   });
   await recordStats("run", meta);
 
-  return {
-    content: [{ type: "text", text: formatted.text }],
-    _meta: meta,
-  };
+  return toolTextResult(formatted.text, meta, byteLimit);
 }

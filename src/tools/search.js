@@ -5,10 +5,13 @@ import { MAX_BYTES, MAX_LINES, MAX_READ_BYTES, RG_NAME } from "../constants.js";
 import { formatOutput } from "../output.js";
 import { commandError, runProcessLines } from "../process.js";
 import { recordStats } from "../stats.js";
-import { formatTruncationReason, invalidParams, relativePath, savingsForText, savingsMeta, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
+import { formatTruncationReason, invalidParams, relativePath, savingsForText, savingsMeta, toolTextResult, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
 
 const MATCH_SEPARATOR = "\x1f";
 const CONTEXT_SEPARATOR = "\x1e";
+const MAX_AST_CONTEXT_DISPLAY_LINES = 12;
+const AST_CONTEXT_HEAD_LINES = 8;
+const AST_CONTEXT_TAIL_LINES = 3;
 const searchTruncationHint = "Increase maxMatches/maxLines/maxBytes or narrow path/include.";
 const AST_LANGUAGE_BY_EXTENSION = new Map([
   [".c", "c"],
@@ -215,7 +218,7 @@ export async function searchTool(args) {
     commandError(`rg ${rgArgs.join(" ")}`, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge);
   }
 
-  const matches = result.lines;
+  const matches = result.lines.map(normalizeRgMatchLine);
   const shown = matches.slice(0, limit);
   const matchLimited = result.truncated || result.outputTooLarge || matches.length > limit;
   const originalText = matches.join("\n");
@@ -242,10 +245,13 @@ export async function searchTool(args) {
   });
   await recordStats("search", meta);
 
-  return {
-    content: [{ type: "text", text: formatted.text }],
-    _meta: meta,
-  };
+  return toolTextResult(formatted.text, meta, byteLimit);
+}
+
+function normalizeRgMatchLine(line) {
+  const match = line.match(/^(.*?)(:\d+:)/);
+  if (!match) return line;
+  return `${relativePath(match[1])}${match[2]}${line.slice(match[0].length)}`;
 }
 
 function truncatedMatchesLine(shownMatches) {
@@ -340,7 +346,7 @@ async function astSearchTool(pattern, searchPath, include, language, contextLine
   });
   await recordStats("search", meta);
 
-  return { content: [{ type: "text", text: formatted.text }], _meta: meta };
+  return toolTextResult(formatted.text, meta, maxBytes);
 }
 
 function parseAstGrepLine(line) {
@@ -362,10 +368,13 @@ function formatAstMatches(matches, limited) {
 function formatAstMatch(match) {
   const file = typeof match.file === "string" ? relativePath(match.file) : "(unknown file)";
   const start = match.range?.start;
+  const end = match.range?.end;
   const line = Number.isInteger(start?.line) ? start.line + 1 : 0;
+  const endLine = Number.isInteger(end?.line) ? end.line + 1 : line;
   const column = Number.isInteger(start?.column) ? start.column + 1 : 0;
   const matchText = compactAstText(match.text);
-  const header = `${file}:${line}:${column}: ${matchText}`;
+  const spanHint = endLine > line ? ` [lines ${line}-${endLine}; use read fromLine=${line} toLine=${endLine}]` : "";
+  const header = `${file}:${line}:${column}: ${matchText}${spanHint}`;
   const context = formatAstContext(match, line);
   return context.length > 0 ? [header, ...context] : [header];
 }
@@ -384,11 +393,27 @@ function formatAstContext(match, startLine) {
   const needle = typeof match.text === "string" ? match.text.trim().split(/\r?\n/)[0]?.trim() : "";
   const matchIndex = Math.max(0, contextLines.findIndex((line) => needle && line.includes(needle)));
   const firstLine = startLine - matchIndex;
+  const entries = limitAstContextEntries(contextLines.map((text, index) => ({
+    text,
+    line: firstLine + index,
+    marker: index === matchIndex,
+  })));
 
-  return contextLines.map((line, index) => {
-    const marker = index === matchIndex ? ">" : " ";
-    return `${marker} ${firstLine + index}: ${line}`;
-  });
+  return entries.map((entry) => entry.omitted
+    ? `[omitted: ${entry.omitted} AST context lines]`
+    : `${entry.marker ? ">" : " "} ${entry.line}: ${entry.text}`);
+}
+
+function limitAstContextEntries(entries) {
+  if (entries.length <= MAX_AST_CONTEXT_DISPLAY_LINES) return entries;
+
+  const head = entries.slice(0, AST_CONTEXT_HEAD_LINES);
+  const tail = entries.slice(-AST_CONTEXT_TAIL_LINES);
+  return [
+    ...head,
+    { omitted: entries.length - head.length - tail.length },
+    ...tail,
+  ];
 }
 
 async function searchWithContext(rg, pattern, searchPath, include, contextLines, maxMatches, maxLines, maxBytes) {
@@ -443,7 +468,7 @@ async function searchWithContext(rg, pattern, searchPath, include, contextLines,
   });
   await recordStats("search", meta);
 
-  return { content: [{ type: "text", text: formatted.text }], _meta: meta };
+  return toolTextResult(formatted.text, meta, maxBytes);
 }
 
 function limitRgContext(lines, maxMatches, contextLines) {

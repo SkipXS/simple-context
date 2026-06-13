@@ -64,8 +64,8 @@ export const tools = {
           maxLines: {
             type: "integer",
             minimum: 10,
-            maximum: 200,
-            description: "Max output lines before head+tail truncation. Default: 120.",
+            maximum: 500,
+            description: "Max output lines before head+tail truncation. Default: 120. Logs allows up to 500 for CI/test output.",
           },
           maxBytes: {
             type: "integer",
@@ -235,8 +235,8 @@ export const tools = {
         type: "object",
         properties: {
           path: { type: "string", description: "Optional file or directory pathspec to diff or filter history. Blank values are treated as omitted." },
-          mode: { type: "string", enum: ["diff", "status", "history"], description: "Return diff hunks, changed-file status, or commit history. Default: diff. Status excludes untracked files unless staged." },
-          staged: { type: "boolean", description: "Show staged changes with git diff --cached. Default: false." },
+          mode: { type: "string", enum: ["diff", "status", "history"], description: "Return diff hunks, changed-file status, or commit history. Default: diff. Status shows unstaged tracked changes by default; staged=true shows staged changes." },
+          staged: { type: "boolean", description: "For diff: use git diff --cached. For status: show staged instead of unstaged tracked changes. Default: false." },
           stat: { type: "boolean", description: "Include git diff --stat before hunks. Default: true." },
           maxFiles: {
             type: "integer",

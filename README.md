@@ -55,10 +55,10 @@ Command output collection is capped at 10 MB by default before formatting. Overr
 Runs a shell command and extracts relevant error or warning blocks with surrounding context. Use it for tests, builds, lints, compiler output, server logs, and CI-style output where the important lines may appear in the middle. Matching blocks are sorted by severity, then source line; plain-output fallback remains chronological.
 
 ```json
-{ "command": "npm test", "maxBlocks": 10, "contextLines": 5, "maxBytes": 16384, "timeoutMs": 600000 }
+{ "command": "npm test", "maxBlocks": 10, "contextLines": 5, "maxLines": 300, "maxBytes": 16384, "timeoutMs": 600000 }
 ```
 
-Unlike `run`, non-zero exits return a normal tool response with `exitCode`, `durationMs`, `blocksFound`, and savings metadata in `_meta`. If no error-like patterns are found, `logs` returns a compact tail fallback.
+Unlike `run`, non-zero exits return a normal tool response with `exitCode`, `durationMs`, `blocksFound`, and savings metadata in `_meta`. If no error-like patterns are found, `logs` returns a compact tail fallback. `logs.maxLines` accepts up to 500 lines because CI/test diagnostics often need more room; `maxBytes` still caps the formatted response at 32 KB.
 
 ### `read`
 
@@ -243,7 +243,7 @@ Large output is returned as head + tail with compact ASCII truncation markers:
 ...
 ```
 
-The response always includes `_meta.truncated`; treat it as the authoritative truncation signal. If it is `true`, `_meta.truncation` gives a compact `{ "reason", "retryHint" }` such as `format_lines`, `download_limit`, `max_files`, or `depth_limit`. The LLM can re-run with a higher `maxLines` or `maxBytes`, pre-filter the command, read a narrower `read` line range, or fall back to the native client tool when every line is genuinely needed.
+The response always includes `_meta.truncated`; treat it as the authoritative truncation signal. If it is `true`, `_meta.truncation` gives a compact `{ "reason", "retryHint" }` such as `format_lines`, `download_limit`, `max_files`, or `depth_limit`. Truncated responses also try to append a visible one-line retry notice so clients that hide `_meta` still give the LLM a useful next step. The LLM can re-run with a higher `maxLines` or `maxBytes`, pre-filter the command, read a narrower `read` line range, or fall back to the native client tool when every line is genuinely needed.
 
 Each tool response reports compact savings stats in `_meta.response`: `totalBytes`, `returnedBytes`, `savedBytes`, `savedPercent`, and `estimatedTokensSaved`. `_meta.response.truncated` is kept as a compatibility mirror of `_meta.truncated`, not a separate retry signal. Byte counters are not duplicated at the top level of `_meta`; top-level fields are reserved for tool-specific facts such as `durationMs`, `emptyReason`, `exitCode`, `stderrOmitted`, `stderrBytes`, `shownMatches`, or `filesChanged`. Empty/no-result responses set `_meta.empty: true` plus a compact reason such as `no_matches`, `no_output`, or `no_diff`. Token savings are approximate and use `savedBytes / 4` as a dependency-free estimate. In `usage` `mode: "stats"`, top-level totals describe aggregate usage stats while formatted response savings remain in `_meta.response`.
 

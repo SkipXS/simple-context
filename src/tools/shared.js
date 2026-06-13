@@ -109,3 +109,42 @@ export function savingsForText(originalText, returnedText) {
     estimatedTokensSaved: Math.ceil(savedBytes / 4),
   };
 }
+
+export function toolTextResult(text, meta, maxBytes) {
+  const finalText = appendVisibleTruncationNotice(text, meta, maxBytes);
+  return {
+    content: [{ type: "text", text: finalText }],
+    _meta: finalText === text ? meta : updateReturnedBytes(meta, finalText),
+  };
+}
+
+function appendVisibleTruncationNotice(text, meta, maxBytes = Number.POSITIVE_INFINITY) {
+  if (!meta?.truncated || !meta.truncation?.reason) return text;
+
+  const hint = meta.truncation.retryHint ? `; ${meta.truncation.retryHint}` : "";
+  const notice = `[truncated: ${meta.truncation.reason}${hint}]`;
+  if (text.includes(notice)) return text;
+
+  const knownLowerBound = meta.response?.totalBytesKnown === false && Number.isFinite(meta.response?.totalBytes)
+    ? meta.response.totalBytes
+    : Number.POSITIVE_INFINITY;
+  const effectiveMaxBytes = Math.min(maxBytes, knownLowerBound);
+  const candidate = `${text}\n${notice}`;
+  return Buffer.byteLength(candidate, "utf8") <= effectiveMaxBytes ? candidate : text;
+}
+
+function updateReturnedBytes(meta, text) {
+  const returnedBytes = Buffer.byteLength(text, "utf8");
+  const response = meta.response && typeof meta.response === "object" ? { ...meta.response } : {};
+  const totalBytes = Math.max(response.totalBytes ?? returnedBytes, returnedBytes);
+  const savedBytes = Math.max(0, totalBytes - returnedBytes);
+
+  response.totalBytes = totalBytes;
+  response.returnedBytes = returnedBytes;
+  response.savedBytes = savedBytes;
+  response.savedPercent = totalBytes > 0 ? Math.round((savedBytes / totalBytes) * 100) : 0;
+  response.estimatedTokensSaved = Math.ceil(savedBytes / 4);
+  response.truncated = Boolean(meta.truncated);
+
+  return { ...meta, response };
+}

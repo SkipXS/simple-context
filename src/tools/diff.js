@@ -2,7 +2,7 @@ import { MAX_BYTES, MAX_LINES } from "../constants.js";
 import { formatOutput } from "../output.js";
 import { commandError, runProcess } from "../process.js";
 import { recordStats } from "../stats.js";
-import { formatTruncationReason, invalidParams, omission, relativePath, savingsForText, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
+import { formatTruncationReason, invalidParams, omission, relativePath, savingsForText, toolTextResult, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
 
 export async function diffTool(args) {
   const {
@@ -77,10 +77,7 @@ export async function diffTool(args) {
   });
   await recordStats("diff", meta);
 
-  return {
-    content: [{ type: "text", text: formatted.text }],
-    _meta: meta,
-  };
+  return toolTextResult(formatted.text, meta, byteLimit);
 }
 
 async function historyTool(diffPath, maxCommits, maxLines, maxBytes) {
@@ -115,7 +112,7 @@ async function historyTool(diffPath, maxCommits, maxLines, maxBytes) {
   });
   await recordStats("diff", meta);
 
-  return { content: [{ type: "text", text: formatted.text }], _meta: meta };
+  return toolTextResult(formatted.text, meta, maxBytes);
 }
 
 async function statusTool(diffPath, staged, maxLines, maxBytes) {
@@ -152,7 +149,7 @@ async function statusTool(diffPath, staged, maxLines, maxBytes) {
   });
   await recordStats("diff", meta);
 
-  return { content: [{ type: "text", text: formatted.text }], _meta: meta };
+  return toolTextResult(formatted.text, meta, maxBytes);
 }
 
 function formatStatusLine(line) {

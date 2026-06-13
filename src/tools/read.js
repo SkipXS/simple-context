@@ -4,7 +4,7 @@ import { StringDecoder } from "node:string_decoder";
 import { MAX_BYTES, MAX_LINES, MAX_READ_BYTES, READ_RANGE_TIMEOUT_MS } from "../constants.js";
 import { decodeUtf8, formatOutput } from "../output.js";
 import { recordStats } from "../stats.js";
-import { formatTruncationReason, invalidParams, omission, omitUndefined, relativePath, savingsForText, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
+import { formatTruncationReason, invalidParams, omission, omitUndefined, relativePath, savingsForText, toolTextResult, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
 
 const READ_MANY_CONCURRENCY = 4;
 
@@ -112,10 +112,7 @@ export async function readManyTool(args, toolName = "read") {
   });
   await recordStats(toolName, meta);
 
-  return {
-    content: [{ type: "text", text: formatted.text }],
-    _meta: meta,
-  };
+  return toolTextResult(formatted.text, meta, totalLimit);
 }
 
 async function mapLimited(items, limit, mapper) {
@@ -183,10 +180,7 @@ async function readFilePreview(args, toolName) {
     scanTimedOut,
     lineNumbers,
   });
-  return {
-    content: [{ type: "text", text: formatted.text }],
-    _meta: meta,
-  };
+  return toolTextResult(formatted.text, meta, Math.min(byteLimit, MAX_READ_BYTES));
 }
 
 function savingsForReturnedBytes(totalBytes, returnedBytes) {

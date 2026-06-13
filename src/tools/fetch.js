@@ -3,7 +3,7 @@ import { ALLOW_NON_HTTP_FETCH, CACHE_TTL_MS, MAX_BYTES, MAX_FETCH_BYTES, MAX_LIN
 import { getCache, updateCache } from "../cache.js";
 import { decodeUtf8, formatOutput } from "../output.js";
 import { recordStats } from "../stats.js";
-import { formatTruncationReason, invalidParams, savingsMeta, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
+import { formatTruncationReason, invalidParams, savingsMeta, toolTextResult, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
 
 function htmlToText(html) {
   return html
@@ -193,8 +193,5 @@ export async function fetchTool(args) {
   });
   await recordStats("fetch", meta);
 
-  return {
-    content: [{ type: "text", text: formatted.text }],
-    _meta: meta,
-  };
+  return toolTextResult(formatted.text, meta, Math.min(byteLimit, MAX_FETCH_BYTES));
 }

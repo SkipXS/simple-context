@@ -2,7 +2,7 @@ import { MAX_BYTES, MAX_LINES, projectKey } from "../constants.js";
 import { formatOutput } from "../output.js";
 import { emptyCounter, formatStatsReport, getStats, normalizeCounter, withSavedPercent } from "../stats.js";
 import { usageReport } from "../usage.js";
-import { formatTruncationReason, invalidParams, responseMeta, savingsMeta, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
+import { formatTruncationReason, invalidParams, responseMeta, savingsMeta, toolTextResult, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
 
 export async function usageTool(args) {
   const { mode = "stats", maxEvents = 1000, maxLines = MAX_LINES, maxBytes = MAX_BYTES } = args ?? {};
@@ -28,7 +28,7 @@ export async function usageTool(args) {
     durationMs: Date.now() - started,
   });
 
-  return { content: [{ type: "text", text: formatted.text }], _meta: meta };
+  return toolTextResult(formatted.text, meta, byteLimit);
 }
 
 function formatGuidance(report) {

@@ -2,7 +2,7 @@ import { COMMAND_SHELL_NAME, DEFAULT_COMMAND_TIMEOUT_MS, MAX_BYTES, MAX_COMMAND_
 import { formatOutput } from "../output.js";
 import { runCommandResult } from "../process.js";
 import { recordStats } from "../stats.js";
-import { formatTruncationReason, invalidParams, omission, savingsForText, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
+import { formatTruncationReason, invalidParams, omission, savingsForText, toolTextResult, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
 
 export async function logsTool(args) {
   return await logsResult(args, "logs");
@@ -24,7 +24,7 @@ export async function logsResult(args, toolName) {
 
   const blockLimit = validateInteger(maxBlocks, `${toolName} maxBlocks`, 1, 50);
   const contextLimit = validateInteger(contextLines, `${toolName} contextLines`, 0, 20);
-  const lineLimit = validateInteger(maxLines, `${toolName} maxLines`, 10, 200);
+  const lineLimit = validateInteger(maxLines, `${toolName} maxLines`, 10, 500);
   const byteLimit = validateInteger(maxBytes, `${toolName} maxBytes`, 1024, MAX_BYTES);
   const timeoutLimit = validateInteger(timeoutMs, `${toolName} timeoutMs`, MIN_COMMAND_TIMEOUT_MS, MAX_COMMAND_TIMEOUT_MS);
 
@@ -36,11 +36,11 @@ export async function logsResult(args, toolName) {
   const previewText = [statusLine, extraction.text].join("\n");
   const formatted = formatOutput(previewText, lineLimit, byteLimit);
   const logSavings = savingsForText(originalText, formatted.text);
+  const accounting = accountForDiagnosticOverhead(logSavings);
   const truncated = extraction.truncated || formatted.truncated || result.outputTooLarge;
   const meta = withResponseMeta({
     totalLines: originalText.split("\n").length,
-    totalBytes: logSavings.totalBytes,
-    ...logSavings,
+    ...accounting,
     truncated,
     ...truncationMeta(truncated, logsTruncationReason(extraction, formatted, result, lineLimit, byteLimit), "Increase maxBlocks/contextLines/maxLines/maxBytes or rerun command directly."),
     empty: outputText === "",
@@ -59,9 +59,20 @@ export async function logsResult(args, toolName) {
   });
   await recordStats(toolName, meta);
 
+  return toolTextResult(formatted.text, meta, byteLimit);
+}
+
+function accountForDiagnosticOverhead(savings) {
+  const totalBytes = Math.max(savings.totalBytes, savings.returnedBytes);
+  const savedBytes = Math.max(0, totalBytes - savings.returnedBytes);
   return {
-    content: [{ type: "text", text: formatted.text }],
-    _meta: meta,
+    sourceBytes: savings.totalBytes,
+    outputOverheadBytes: Math.max(0, savings.returnedBytes - savings.totalBytes),
+    totalBytes,
+    returnedBytes: savings.returnedBytes,
+    savedBytes,
+    savedPercent: totalBytes > 0 ? Math.round((savedBytes / totalBytes) * 100) : 0,
+    estimatedTokensSaved: Math.ceil(savedBytes / 4),
   };
 }
 

@@ -4,7 +4,7 @@ import { MAX_BYTES, MAX_LINES, MAX_READ_BYTES } from "../constants.js";
 import { decodeUtf8, formatOutput } from "../output.js";
 import { runProcess, runProcessLines } from "../process.js";
 import { recordStats } from "../stats.js";
-import { formatTruncationReason, invalidParams, omission, relativePath, savingsMeta, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
+import { formatTruncationReason, invalidParams, omission, relativePath, savingsMeta, toolTextResult, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
 
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage"]);
 
@@ -63,7 +63,7 @@ async function filesMode(args) {
   });
   await recordStats("discover", meta);
 
-  return { content: [{ type: "text", text: formatted.text }], _meta: meta };
+  return toolTextResult(formatted.text, meta, byteLimit);
 }
 
 async function listFiles(inputPath, matcher, maxFiles) {
@@ -151,7 +151,7 @@ async function treeMode(args) {
   });
   await recordStats("discover", meta);
 
-  return { content: [{ type: "text", text: formatted.text }], _meta: meta };
+  return toolTextResult(formatted.text, meta, byteLimit);
 }
 
 async function appendTree(directory, prefix, depth, maxDepth, maxEntries, state, lines) {
@@ -270,7 +270,7 @@ async function summaryMode(args) {
   const meta = withResponseMeta({ mode: "summary", root, relativeRoot: relativePath(root), totalLines: formatted.totalLines, totalBytes: formatted.totalBytes, ...savingsMeta(formatted), truncated: formatted.truncated, ...truncationMeta(formatted.truncated, formatTruncationReason(formatted, lineLimit, byteLimit), "Increase maxLines/maxBytes."), durationMs: Date.now() - started });
   await recordStats("discover", meta);
 
-  return { content: [{ type: "text", text: formatted.text }], _meta: meta };
+  return toolTextResult(formatted.text, meta, byteLimit);
 }
 
 async function readReadmePreviewIfExists(filePath) {
@@ -354,7 +354,7 @@ async function outlineMode(args) {
   });
   await recordStats("discover", meta);
 
-  return { content: [{ type: "text", text: formatted.text }], _meta: meta };
+  return toolTextResult(formatted.text, meta, byteLimit);
 }
 
 function extractOutline(text) {
