@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 const npmExecPath = process.env.npm_execpath;
-const npmCommand = npmExecPath ? process.execPath : process.platform === "win32" ? "npm.cmd" : "npm";
-const npmArgsPrefix = npmExecPath ? [npmExecPath] : [];
+const bundledNpmCli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+const useBundledNpmCli = !npmExecPath && process.platform === "win32" && existsSync(bundledNpmCli);
+const npmCommand = npmExecPath || useBundledNpmCli ? process.execPath : process.platform === "win32" ? "npm.cmd" : "npm";
+const npmArgsPrefix = npmExecPath ? [npmExecPath] : useBundledNpmCli ? [bundledNpmCli] : [];
+const npmUsesShell = !npmExecPath && !useBundledNpmCli && process.platform === "win32";
 
 function run(command, args, options = {}) {
   return new Promise((resolveRun, reject) => {
@@ -15,6 +19,7 @@ function run(command, args, options = {}) {
       env: options.env,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      shell: options.shell ?? false,
     });
 
     const stdout = [];
@@ -48,7 +53,14 @@ async function collectMcpResponses(child, expectedCount) {
   let buffer = "";
 
   return await new Promise((resolveCollect, reject) => {
-    const timer = setTimeout(() => reject(new Error("timed out waiting for installed MCP server")), 5_000);
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const timer = setTimeout(() => finish(reject, new Error("timed out waiting for installed MCP server")), 5_000);
     child.stdout.on("data", (chunk) => {
       buffer += chunk.toString();
 
@@ -61,13 +73,25 @@ async function collectMcpResponses(child, expectedCount) {
         if (!line) continue;
         responses.push(JSON.parse(line));
         if (responses.length >= expectedCount) {
-          clearTimeout(timer);
-          resolveCollect(responses);
+          finish(resolveCollect, responses);
         }
       }
     });
-    child.on("error", reject);
-    child.on("exit", (code, signal) => reject(new Error(`installed MCP server exited early: ${code ?? signal}`)));
+    child.on("error", (error) => finish(reject, error));
+    child.on("exit", (code, signal) => finish(reject, new Error(`installed MCP server exited early: ${code ?? signal}`)));
+  });
+}
+
+async function stopChild(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise((resolveStop) => {
+    const timer = setTimeout(resolveStop, 2_000);
+    child.once("close", () => {
+      clearTimeout(timer);
+      resolveStop();
+    });
+    child.stdin.destroy();
+    child.kill();
   });
 }
 
@@ -76,14 +100,13 @@ let tarballPath;
 
 try {
   tempDir = await mkdtemp(join(tmpdir(), "simple-context-limiter-pack-"));
-  const pack = await run(npmCommand, [...npmArgsPrefix, "pack", "--ignore-scripts", "--json"]);
+  const pack = await run(npmCommand, [...npmArgsPrefix, "pack", "--ignore-scripts", "--json"], { shell: npmUsesShell });
   const packed = JSON.parse(pack.stdout);
   tarballPath = resolve(packed[0].filename);
 
-  await run(npmCommand, [...npmArgsPrefix, "install", "--ignore-scripts", "--no-audit", "--no-fund", tarballPath], { cwd: tempDir });
+  await run(npmCommand, [...npmArgsPrefix, "install", "--ignore-scripts", "--no-audit", "--no-fund", tarballPath], { cwd: tempDir, shell: npmUsesShell });
 
-  const serverPath = join(tempDir, "node_modules", "simple-context-limiter", "server.js");
-  const child = spawn(process.execPath, [serverPath], {
+  const child = spawn(npmCommand, [...npmArgsPrefix, "exec", "--", "simple-context-limiter"], {
     cwd: tempDir,
     env: {
       ...process.env,
@@ -92,6 +115,7 @@ try {
     },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
+    shell: npmUsesShell,
   });
 
   try {
@@ -115,7 +139,7 @@ try {
       "sc-usage",
     ]);
   } finally {
-    child.kill();
+    await stopChild(child);
   }
 
   console.log("pack smoke test passed");

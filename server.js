@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
-import { MAX_RPC_BATCH_CONCURRENCY, MAX_RPC_BATCH_SIZE, MAX_RPC_LINE_BYTES, MAX_RPC_TOOL_CONCURRENCY, SERVER_NAME, SERVER_VERSION } from "./src/constants.js";
+import { MAX_RPC_BATCH_CONCURRENCY, MAX_RPC_BATCH_SIZE, MAX_RPC_LINE_BYTES, MAX_RPC_PENDING_REQUESTS, MAX_RPC_TOOL_CONCURRENCY, MAX_RPC_TOOL_QUEUE, SERVER_NAME, SERVER_VERSION } from "./src/constants.js";
 import { tools, callTool } from "./src/tools.js";
 import { commandErrorData, errorData } from "./src/process.js";
 
 const PROTOCOL_VERSION = "2024-11-05";
+const OVERLOAD_ERROR_CODE = -32003;
 
 function handleStdoutError(error) {
   if (error?.code === "EPIPE" || error?.code === "ERR_STREAM_DESTROYED") process.exit(0);
@@ -36,7 +37,7 @@ function resultResponse(id, result) {
 }
 
 function isProtocolToolError(error) {
-  return error?.code === -32601 || error?.code === -32602 || error?.code === -32002;
+  return error?.code === -32601 || error?.code === -32602 || error?.code === -32002 || error?.code === OVERLOAD_ERROR_CODE;
 }
 
 function toolErrorResult(error) {
@@ -127,10 +128,25 @@ function rpcCode(error) {
 let activeToolCalls = 0;
 const waitingToolCalls = [];
 
+function overloadError(message, data) {
+  const error = new Error(message);
+  error.code = OVERLOAD_ERROR_CODE;
+  if (data !== undefined) error.data = data;
+  return error;
+}
+
 function acquireToolCallSlot() {
   if (activeToolCalls < MAX_RPC_TOOL_CONCURRENCY) {
     activeToolCalls++;
     return undefined;
+  }
+  if (waitingToolCalls.length >= MAX_RPC_TOOL_QUEUE) {
+    throw overloadError("Server overloaded: tool call queue is full", {
+      activeToolCalls,
+      waitingToolCalls: waitingToolCalls.length,
+      maxToolConcurrency: MAX_RPC_TOOL_CONCURRENCY,
+      maxToolQueue: MAX_RPC_TOOL_QUEUE,
+    });
   }
   return new Promise((resolve) => waitingToolCalls.push(resolve));
 }
@@ -206,7 +222,7 @@ async function handleMessage(msg) {
   } catch (e) {
     if (!hasId) return undefined;
     if (method === "tools/call" && !isProtocolToolError(e)) return resultResponse(id, toolErrorResult(e));
-    return errorResponse(id, rpcCode(e), e.message, commandErrorData(e) ?? errorData(e));
+    return errorResponse(id, rpcCode(e), e.message, e.data ?? commandErrorData(e) ?? errorData(e));
   }
 }
 
@@ -258,6 +274,7 @@ async function handleLine(line) {
   }
 }
 
+let pendingRequestLines = 0;
 let lineChunks = [];
 let lineBytes = 0;
 let discardingLine = false;
@@ -288,7 +305,63 @@ function finishLine() {
 
   const line = Buffer.concat(lineChunks, lineBytes).toString("utf8").replace(/\r$/, "");
   resetLine();
-  void handleLine(line);
+  dispatchLine(line);
+}
+
+function dispatchLine(line) {
+  if (pendingRequestLines >= MAX_RPC_PENDING_REQUESTS) {
+    sendOverloadForLine(line);
+    return;
+  }
+
+  pendingRequestLines++;
+  void handleLine(line)
+    .catch((error) => sendError(null, rpcCode(error), error.message))
+    .finally(() => {
+      pendingRequestLines--;
+    });
+}
+
+function sendOverloadForLine(line) {
+  const responses = overloadResponsesForLine(line);
+  if (responses === undefined) return;
+  if (Array.isArray(responses)) {
+    if (responses.length > 0) send(responses);
+    return;
+  }
+  send(responses);
+}
+
+function overloadResponsesForLine(line) {
+  let message;
+  try {
+    message = JSON.parse(line);
+  } catch {
+    return errorResponse(null, OVERLOAD_ERROR_CODE, "Server overloaded: pending request limit reached", overloadLimitData());
+  }
+
+  if (Array.isArray(message)) {
+    return message
+      .filter((item) => isRequestObject(item) && hasRequestId(item) && isValidRequestId(item.id))
+      .map((item) => overloadResponse(item.id));
+  }
+
+  if (isRequestObject(message) && hasRequestId(message) && isValidRequestId(message.id)) return overloadResponse(message.id);
+  return undefined;
+}
+
+function overloadResponse(id) {
+  return errorResponse(id, OVERLOAD_ERROR_CODE, "Server overloaded: pending request limit reached", overloadLimitData());
+}
+
+function overloadLimitData() {
+  return {
+    pendingRequestLines,
+    maxPendingRequests: MAX_RPC_PENDING_REQUESTS,
+    activeToolCalls,
+    waitingToolCalls: waitingToolCalls.length,
+    maxToolQueue: MAX_RPC_TOOL_QUEUE,
+  };
 }
 
 process.stdin.on("data", (chunk) => {

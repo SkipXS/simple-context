@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 import { ALLOW_NON_HTTP_FETCH, CACHE_TTL_MS, DEFAULT_BYTES, MAX_BYTES, MAX_FETCH_BYTES, MAX_LINES, SERVER_VERSION } from "../constants.js";
 import { getCache, updateCache } from "../cache.js";
-import { decodeUtf8, formatOutput } from "../output.js";
+import { formatOutput } from "../output.js";
 import { recordStats } from "../stats.js";
 import { formatTruncationReason, invalidParams, savingsMeta, toolTextResult, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
 
@@ -61,7 +62,7 @@ function decodeNumericHtmlEntity(match, value) {
   return String.fromCodePoint(codePoint);
 }
 
-async function fetchUrl(url, force) {
+async function fetchUrl(url, { force = false, cache: cacheArg } = {}) {
   let parsed;
   try { parsed = new URL(url); } catch {
     invalidParams("fetch requires a valid URL");
@@ -72,22 +73,29 @@ async function fetchUrl(url, force) {
 
   const key = createHash("sha256").update(url).digest("hex");
   const started = Date.now();
-  const currentCache = await getCache();
-  const cached = currentCache[key];
-  if (!force && cached && !cached.limited && Date.now() - cached.ts < CACHE_TTL_MS) {
-    return {
-      content: cached.content,
-      cached: true,
-      limited: cached.limited ?? false,
-      url,
-      finalUrl: cached.finalUrl ?? url,
-      status: cached.status,
-      statusText: cached.statusText,
-      contentType: cached.contentType,
-      htmlStripped: cached.htmlStripped,
-      transformed: cached.transformed,
-      durationMs: Date.now() - started,
-    };
+  const initialCachePolicy = fetchCachePolicy(url, undefined, cacheArg);
+  if (initialCachePolicy.read && !force) {
+    const currentCache = await getCache();
+    const cached = currentCache[key];
+    const cachedCachePolicy = cached ? fetchCachePolicy(url, cached.finalUrl ?? url, cacheArg) : initialCachePolicy;
+    if (cachedCachePolicy.read && cached && !cached.limited && Date.now() - cached.ts < CACHE_TTL_MS) {
+      return {
+        content: cached.content,
+        cached: true,
+        limited: cached.limited ?? false,
+        url,
+        finalUrl: cached.finalUrl ?? url,
+        status: cached.status,
+        statusText: cached.statusText,
+        contentType: cached.contentType,
+        charset: cached.charset,
+        htmlStripped: cached.htmlStripped,
+        transformed: cached.transformed,
+        cacheEligible: cachedCachePolicy.write,
+        cacheSkippedReason: cachedCachePolicy.reason,
+        durationMs: Date.now() - started,
+      };
+    }
   }
 
   let res;
@@ -115,28 +123,182 @@ async function fetchUrl(url, force) {
   }
 
   const contentType = res.headers.get("content-type") ?? "";
-  const htmlStripped = /\bhtml\b/i.test(contentType);
-  const { text: raw, limited } = await readLimitedText(res, MAX_FETCH_BYTES);
+  const contentInfo = classifyContentType(contentType);
+  if (!contentInfo.textual) {
+    await res.body?.cancel().catch(() => {});
+    const error = new Error(`Fetch returned non-text content (${contentType || "unknown content-type"}); sc-fetch only returns readable text`);
+    error.code = -32000;
+    error.url = url;
+    error.finalUrl = res.url || url;
+    error.contentType = contentType;
+    error.binary = true;
+    throw error;
+  }
+
+  const htmlStripped = contentInfo.html;
+  const { text: raw, limited } = await readLimitedText(res, MAX_FETCH_BYTES, contentInfo.charset);
   const text = htmlStripped ? htmlToText(raw) : raw;
+  const finalUrl = res.url || url;
+  const finalCachePolicy = fetchCachePolicy(url, finalUrl, cacheArg);
   const metadata = {
     url,
-    finalUrl: res.url || url,
+    finalUrl,
     status: res.status,
     statusText: res.statusText,
     contentType,
+    charset: contentInfo.charset,
     htmlStripped,
     transformed: htmlStripped,
   };
 
-  await updateCache((cache) => {
-    if (limited) delete cache[key];
-    else cache[key] = { ts: Date.now(), content: text, limited, ...metadata };
-  });
-  return { content: text, cached: false, limited, ...metadata, durationMs: Date.now() - started };
+  if (finalCachePolicy.write || limited) {
+    await updateCache((cache) => {
+      if (limited || !finalCachePolicy.write) delete cache[key];
+      else cache[key] = { ts: Date.now(), content: text, limited, ...metadata };
+    });
+  }
+  return {
+    content: text,
+    cached: false,
+    limited,
+    ...metadata,
+    cacheEligible: finalCachePolicy.write,
+    cacheSkippedReason: finalCachePolicy.reason,
+    durationMs: Date.now() - started,
+  };
 }
 
-async function readLimitedText(res, maxBytes) {
-  if (!res.body) return { text: await res.text(), limited: false };
+function fetchCachePolicy(url, finalUrl, cacheArg) {
+  if (cacheArg === false) return { read: false, write: false, reason: "per_call_disabled" };
+  if (cacheArg === true) return { read: true, write: true, reason: undefined };
+
+  const envMode = fetchCacheEnvMode();
+  if (envMode === "off") return { read: false, write: false, reason: "env_disabled" };
+
+  const privateUrl = isPrivateFetchUrl(url) || (finalUrl ? isPrivateFetchUrl(finalUrl) : false);
+  if (privateUrl && envMode !== "all") return { read: false, write: false, reason: "private_address" };
+
+  return { read: true, write: true, reason: undefined };
+}
+
+function fetchCacheEnvMode() {
+  const value = process.env.SIMPLE_CONTEXT_LIMITER_FETCH_CACHE;
+  if (/^(0|false|no|off)$/i.test(value ?? "")) return "off";
+  if (/^(all|private)$/i.test(value ?? "")) return "all";
+  return "public";
+}
+
+function isPrivateFetchUrl(value) {
+  let parsed;
+  try { parsed = new URL(value); } catch { return false; }
+  return isPrivateLiteralHost(parsed.hostname);
+}
+
+function isPrivateLiteralHost(hostname) {
+  const host = normalizeHostname(hostname);
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+
+  const ipv4 = parseIpv4(host);
+  if (ipv4) return isPrivateIpv4(ipv4);
+
+  if (isIP(host) === 6) return isPrivateIpv6(host);
+  return false;
+}
+
+function normalizeHostname(hostname) {
+  let host = String(hostname ?? "").trim().toLowerCase();
+  if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+  return host.endsWith(".") ? host.slice(0, -1) : host;
+}
+
+function parseIpv4(host) {
+  const parts = host.split(".");
+  if (parts.length !== 4) return undefined;
+  const octets = parts.map((part) => /^\d+$/.test(part) ? Number(part) : Number.NaN);
+  if (octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return undefined;
+  return octets;
+}
+
+function isPrivateIpv4([a, b]) {
+  return a === 0
+    || a === 10
+    || a === 127
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+    || (a === 169 && b === 254);
+}
+
+function isPrivateIpv6(host) {
+  const bytes = ipv6ToBytes(host);
+  if (!bytes) return false;
+  if (bytes.slice(0, 15).every((byte) => byte === 0) && bytes[15] === 1) return true;
+  if ((bytes[0] & 0xfe) === 0xfc) return true; // fc00::/7 unique-local
+  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return true; // fe80::/10 link-local
+  const mappedPrefix = bytes.slice(0, 10).every((byte) => byte === 0) && bytes[10] === 0xff && bytes[11] === 0xff;
+  return mappedPrefix && isPrivateIpv4(bytes.slice(12, 16));
+}
+
+function ipv6ToBytes(host) {
+  const zoneIndex = host.indexOf("%");
+  const withoutZone = zoneIndex === -1 ? host : host.slice(0, zoneIndex);
+  const [leftRaw, rightRaw = ""] = withoutZone.split("::");
+  if (withoutZone.split("::").length > 2) return undefined;
+
+  const left = parseIpv6Groups(leftRaw);
+  const right = parseIpv6Groups(rightRaw);
+  if (!left || !right) return undefined;
+
+  const missing = 8 - left.length - right.length;
+  if (withoutZone.includes("::") ? missing < 0 : missing !== 0) return undefined;
+  const groups = [...left, ...Array(Math.max(0, missing)).fill(0), ...right];
+  if (groups.length !== 8) return undefined;
+
+  const bytes = [];
+  for (const group of groups) bytes.push(group >> 8, group & 0xff);
+  return bytes;
+}
+
+function parseIpv6Groups(value) {
+  if (value === "") return [];
+  const groups = [];
+  for (const part of value.split(":")) {
+    if (part.includes(".")) {
+      const ipv4 = parseIpv4(part);
+      if (!ipv4) return undefined;
+      groups.push((ipv4[0] << 8) | ipv4[1], (ipv4[2] << 8) | ipv4[3]);
+    } else if (/^[0-9a-f]{1,4}$/i.test(part)) {
+      groups.push(Number.parseInt(part, 16));
+    } else {
+      return undefined;
+    }
+  }
+  return groups;
+}
+
+function classifyContentType(contentType) {
+  const mediaType = contentType.split(";")[0].trim().toLowerCase();
+  const charset = parseCharset(contentType) ?? "utf-8";
+  const textual = mediaType === ""
+    || mediaType.startsWith("text/")
+    || mediaType === "application/json"
+    || mediaType.endsWith("+json")
+    || mediaType === "application/xml"
+    || mediaType.endsWith("+xml")
+    || mediaType === "application/javascript"
+    || mediaType === "application/x-javascript"
+    || mediaType === "application/x-www-form-urlencoded"
+    || mediaType === "image/svg+xml";
+
+  return { textual, html: /\bhtml\b/i.test(mediaType), charset };
+}
+
+function parseCharset(contentType) {
+  const match = /(?:^|;)\s*charset\s*=\s*("[^"]+"|'[^']+'|[^;\s]+)/i.exec(contentType);
+  return match ? match[1].replace(/^['"]|['"]$/g, "").toLowerCase() : undefined;
+}
+
+async function readLimitedText(res, maxBytes, charset = "utf-8") {
+  if (!res.body) return { text: decodeBytes(Buffer.from(await res.arrayBuffer()), charset), limited: false };
 
   const reader = res.body.getReader();
   const chunks = [];
@@ -166,18 +328,49 @@ async function readLimitedText(res, maxBytes) {
     reader.releaseLock();
   }
 
-  return { text: decodeUtf8(Buffer.concat(chunks), { trimEnd: limited }), limited };
+  const buffer = Buffer.concat(chunks);
+  return { text: decodeBytes(limited ? trimPartialUtf8(buffer, charset) : buffer, charset), limited };
+}
+
+function decodeBytes(buffer, charset) {
+  try {
+    return new TextDecoder(charset || "utf-8").decode(buffer);
+  } catch (cause) {
+    const error = new Error(`Unsupported response charset: ${charset}`);
+    error.code = -32000;
+    error.cause = cause;
+    throw error;
+  }
+}
+
+function trimPartialUtf8(buffer, charset) {
+  if (!/^utf-?8$/i.test(charset ?? "")) return buffer;
+  return buffer.subarray(0, trimUtf8End(buffer));
+}
+
+function trimUtf8End(buffer) {
+  if (buffer.length === 0) return 0;
+
+  let leadIndex = buffer.length - 1;
+  while (leadIndex > 0 && (buffer[leadIndex] & 0xc0) === 0x80) leadIndex--;
+
+  const lead = buffer[leadIndex];
+  const expected = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1;
+  return buffer.length - leadIndex < expected ? leadIndex : buffer.length;
 }
 
 export async function fetchTool(args) {
-  const { url, force = false, maxLines = MAX_LINES, maxBytes = DEFAULT_BYTES } = args ?? {};
+  const { url, force = false, cache, maxLines = MAX_LINES, maxBytes = DEFAULT_BYTES } = args ?? {};
   if (force !== undefined && typeof force !== "boolean") {
     invalidParams("fetch force must be a boolean when provided");
+  }
+  if (cache !== undefined && typeof cache !== "boolean") {
+    invalidParams("fetch cache must be a boolean when provided");
   }
   const lineLimit = validateInteger(maxLines, "fetch maxLines", 10, 500);
   const byteLimit = validateInteger(maxBytes, "fetch maxBytes", 1024, MAX_BYTES);
 
-  const data = await fetchUrl(url, force);
+  const data = await fetchUrl(url, { force, cache });
   const responseByteLimit = Math.min(byteLimit, MAX_FETCH_BYTES);
   const formatted = formatOutput(formatFetchDisplayText(data), lineLimit, responseByteLimit);
   const truncated = formatted.truncated || data.limited;
@@ -194,9 +387,12 @@ export async function fetchTool(args) {
     status: data.status,
     statusText: data.statusText,
     contentType: data.contentType,
+    charset: data.charset,
     htmlStripped: data.htmlStripped,
     transformed: data.transformed,
     cached: data.cached,
+    cacheEligible: data.cacheEligible,
+    cacheSkippedReason: data.cacheSkippedReason,
     downloadLimited: data.limited,
     durationMs: data.durationMs,
   });
@@ -213,6 +409,7 @@ function formatFetchDisplayText(data) {
   const notes = [];
   if (data.htmlStripped) notes.push("HTML stripped");
   if (data.cached) notes.push("cached");
+  if (data.cacheSkippedReason) notes.push(`cache skipped: ${data.cacheSkippedReason.replaceAll("_", " ")}`);
   const suffix = notes.length > 0 ? `${status}, ${notes.join(", ")}` : status;
   return [`Source: ${source} (${suffix})`, data.content].join("\n").trimEnd();
 }

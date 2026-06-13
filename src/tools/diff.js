@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { DEFAULT_BYTES, MAX_BYTES, MAX_LINES } from "../constants.js";
 import { formatOutput } from "../output.js";
 import { commandError, runProcess } from "../process.js";
@@ -40,39 +42,47 @@ export async function diffTool(args) {
   if (mode === "history") return await historyTool(normalizedDiffPath, commitLimit, lineLimit, byteLimit);
 
   const started = Date.now();
-  const diffArgs = gitDiffArgs(staged, [], normalizedDiffPath);
-  const statPromise = stat ? runGit(gitDiffArgs(staged, ["--stat"], normalizedDiffPath)) : undefined;
-  const diffPromise = runGit(diffArgs);
-  const [statResult, diffResult] = await Promise.all([statPromise, diffPromise]);
+  const namesResult = await runGitNamePreview(gitDiffArgs(staged, ["--name-only"], normalizedDiffPath), fileLimit + 1);
+  const selectedPaths = namesResult.paths.slice(0, fileLimit);
+  const filesLimited = namesResult.limited || namesResult.paths.length > fileLimit;
+  const statPromise = stat ? runGit(gitDiffArgs(staged, ["--stat", `--stat-count=${fileLimit}`], normalizedDiffPath)) : undefined;
+  const diffPromise = selectedPaths.length > 0
+    ? runGitDiffPreview(gitDiffArgs(staged, [], selectedPaths), hunkLimit, lineLimit, byteLimit)
+    : Promise.resolve({ text: "", filesShown: 0, hunksShown: 0, hunksLimited: false, outputLimited: false });
+  const [statResult, limitedDiff] = await Promise.all([statPromise, diffPromise]);
   const durationMs = Date.now() - started;
 
   const statText = statResult?.stdout.trimEnd() ?? "";
-  const fullDiff = diffResult.stdout.trimEnd();
-  const limitedDiff = limitDiff(fullDiff, fileLimit, hunkLimit);
-  const originalText = composeDiffText(statText, fullDiff);
-  const previewText = composeDiffText(statText, limitedDiff.text);
+  const limitedDiffText = filesLimited && limitedDiff.text
+    ? `${limitedDiff.text}\n${omission("files")}`
+    : limitedDiff.text;
+  const previewText = composeDiffText(statText, limitedDiffText);
   const formatted = formatOutput(previewText, lineLimit, byteLimit);
-  const diffSavings = savingsForText(originalText, formatted.text);
-  const truncated = limitedDiff.filesLimited || limitedDiff.hunksLimited || formatted.truncated;
+  const previewSavings = savingsForText(previewText, formatted.text);
+  const truncated = filesLimited || limitedDiff.hunksLimited || limitedDiff.outputLimited || formatted.truncated;
+  const totalBytesKnown = !truncated;
   const meta = withResponseMeta({
-    totalLines: originalText.split("\n").length,
-    totalBytes: diffSavings.totalBytes,
-    ...diffSavings,
+    totalLines: previewText.split("\n").length,
+    totalBytes: previewSavings.totalBytes,
+    totalBytesKnown,
+    ...previewSavings,
     truncated,
-    ...truncationMeta(truncated, diffTruncationReason(limitedDiff, formatted, lineLimit, byteLimit), diffTruncationHint(limitedDiff, formatted, lineLimit, byteLimit)),
+    ...truncationMeta(truncated, diffTruncationReason({ ...limitedDiff, filesLimited }, formatted, lineLimit, byteLimit), diffTruncationHint({ ...limitedDiff, filesLimited }, formatted, lineLimit, byteLimit)),
     mode,
     path: normalizedDiffPath,
     relativePath: normalizedDiffPath === undefined ? undefined : relativePath(normalizedDiffPath),
     staged,
     stat,
-    filesChanged: countDiffFiles(fullDiff),
+    filesChanged: namesResult.paths.length,
+    filesChangedKnown: !filesLimited,
     filesShown: limitedDiff.filesShown,
-    filesLimited: limitedDiff.filesLimited,
-    hunksChanged: countDiffHunks(fullDiff),
+    filesLimited,
+    hunksChanged: limitedDiff.hunksShown,
+    hunksChangedKnown: !limitedDiff.hunksLimited && !limitedDiff.outputLimited,
     hunksShown: limitedDiff.hunksShown,
     hunksLimited: limitedDiff.hunksLimited,
-    empty: originalText === "(no diff)",
-    emptyReason: originalText === "(no diff)" ? "no_diff" : undefined,
+    empty: previewText === "(no diff)",
+    emptyReason: previewText === "(no diff)" ? "no_diff" : undefined,
     durationMs,
   });
   await recordStats("diff", meta);
@@ -160,7 +170,11 @@ function gitDiffArgs(staged, extraArgs, diffPath) {
   const args = ["diff"];
   if (staged) args.push("--cached");
   args.push(...extraArgs);
-  if (diffPath !== undefined) args.push("--", diffPath);
+  if (Array.isArray(diffPath)) {
+    if (diffPath.length > 0) args.push("--", ...diffPath);
+  } else if (diffPath !== undefined) {
+    args.push("--", diffPath);
+  }
   return args;
 }
 
@@ -171,6 +185,216 @@ async function runGit(args) {
   }
 
   return result;
+}
+
+async function runGitNamePreview(args, maxNames) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn("git", args, {
+      cwd: process.cwd(),
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      detached: process.platform !== "win32",
+    });
+
+    const decoder = new StringDecoder("utf8");
+    const stderr = [];
+    const paths = [];
+    let pendingLine = "";
+    let limited = false;
+    let timedOut = false;
+    let stoppedEarly = false;
+
+    function stopEarly() {
+      if (stoppedEarly) return;
+      stoppedEarly = true;
+      if (process.platform === "win32") child.kill();
+      else {
+        try {
+          process.kill(-child.pid, "SIGTERM");
+        } catch {
+          child.kill("SIGTERM");
+        }
+      }
+    }
+
+    function handleLine(line) {
+      const normalized = line.endsWith("\r") ? line.slice(0, -1) : line;
+      if (!normalized) return true;
+      if (paths.length >= maxNames) {
+        limited = true;
+        stopEarly();
+        return false;
+      }
+
+      paths.push(normalized);
+      if (paths.length >= maxNames) {
+        limited = true;
+        stopEarly();
+        return false;
+      }
+      return true;
+    }
+
+    child.stdout.on("data", (chunk) => {
+      if (stoppedEarly) return;
+      pendingLine += decoder.write(chunk);
+      for (;;) {
+        const newline = pendingLine.indexOf("\n");
+        if (newline === -1) break;
+        const line = pendingLine.slice(0, newline);
+        pendingLine = pendingLine.slice(newline + 1);
+        if (!handleLine(line)) break;
+      }
+    });
+
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stopEarly();
+    }, 120_000);
+
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      if (!stoppedEarly) {
+        pendingLine += decoder.end();
+        if (pendingLine) handleLine(pendingLine);
+      }
+      if ((code !== 0 || timedOut) && !stoppedEarly) {
+        try {
+          commandError(`git ${args.join(" ")}`, code, signal, paths.join("\n"), Buffer.concat(stderr).toString("utf8"), timedOut, false);
+        } catch (error) {
+          reject(error);
+          return;
+        }
+      }
+      resolve({ paths, limited });
+    });
+  });
+}
+
+async function runGitDiffPreview(args, maxHunks, maxOutputLines, maxOutputBytes) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn("git", args, {
+      cwd: process.cwd(),
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      detached: process.platform !== "win32",
+    });
+
+    const decoder = new StringDecoder("utf8");
+    const stderr = [];
+    const output = [];
+    let pendingLine = "";
+    let filesShown = 0;
+    let hunksShown = 0;
+    let hunksLimited = false;
+    let outputLimited = false;
+    let outputBytes = 0;
+    let timedOut = false;
+    let stoppedEarly = false;
+
+    function stopEarly() {
+      if (stoppedEarly) return;
+      stoppedEarly = true;
+      if (process.platform === "win32") child.kill();
+      else {
+        try {
+          process.kill(-child.pid, "SIGTERM");
+        } catch {
+          child.kill("SIGTERM");
+        }
+      }
+    }
+
+    function pushOutput(line) {
+      const separatorBytes = output.length > 0 ? 1 : 0;
+      const lineBytes = Buffer.byteLength(line, "utf8");
+      if (output.length >= maxOutputLines || outputBytes + separatorBytes + lineBytes > maxOutputBytes) return false;
+      output.push(line);
+      outputBytes += separatorBytes + lineBytes;
+      return true;
+    }
+
+    function appendLimitMarker(kind) {
+      const marker = omission(kind);
+      if (output.at(-1) !== marker) pushOutput(marker);
+    }
+
+    function handleLine(line) {
+      const normalized = line.endsWith("\r") ? line.slice(0, -1) : line;
+      if (normalized.startsWith("diff --git ")) filesShown++;
+      if (normalized.startsWith("@@ ")) {
+        if (hunksShown >= maxHunks) {
+          hunksLimited = true;
+          appendLimitMarker("hunks");
+          stopEarly();
+          return false;
+        }
+        hunksShown++;
+      }
+
+      if (!pushOutput(normalized)) {
+        outputLimited = true;
+        appendLimitMarker("diff output");
+        stopEarly();
+        return false;
+      }
+      return true;
+    }
+
+    child.stdout.on("data", (chunk) => {
+      if (stoppedEarly) return;
+      pendingLine += decoder.write(chunk);
+      for (;;) {
+        const newline = pendingLine.indexOf("\n");
+        if (newline === -1) break;
+        const line = pendingLine.slice(0, newline);
+        pendingLine = pendingLine.slice(newline + 1);
+        if (!handleLine(line)) break;
+      }
+    });
+
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stopEarly();
+    }, 120_000);
+
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      if (!stoppedEarly) {
+        pendingLine += decoder.end();
+        if (pendingLine) handleLine(pendingLine);
+      }
+      if ((code !== 0 || timedOut) && !stoppedEarly) {
+        try {
+          commandError(`git ${args.join(" ")}`, code, signal, output.join("\n"), Buffer.concat(stderr).toString("utf8"), timedOut, false);
+        } catch (error) {
+          reject(error);
+          return;
+        }
+      }
+      resolve({
+        text: output.join("\n").trimEnd(),
+        filesShown,
+        hunksShown,
+        hunksLimited,
+        outputLimited,
+      });
+    });
+  });
 }
 
 function composeDiffText(statText, diffText) {
@@ -184,14 +408,6 @@ function composeDiffText(statText, diffText) {
   return parts.length > 0 ? parts.join("\n") : "(no diff)";
 }
 
-function countDiffFiles(diffText) {
-  return diffText ? diffText.split("\n").filter((line) => line.startsWith("diff --git ")).length : 0;
-}
-
-function countDiffHunks(diffText) {
-  return diffText ? diffText.split("\n").filter((line) => line.startsWith("@@ ")).length : 0;
-}
-
 function countHistoryCommits(historyText) {
   return historyText ? historyText.split("\n").filter((line) => line.startsWith("commit ")).length : 0;
 }
@@ -199,75 +415,13 @@ function countHistoryCommits(historyText) {
 function diffTruncationReason(limitedDiff, formatted, maxLines, maxBytes) {
   if (limitedDiff.filesLimited) return "max_files";
   if (limitedDiff.hunksLimited) return "max_hunks";
+  if (limitedDiff.outputLimited) return "format_limit";
   return formatTruncationReason(formatted, maxLines, maxBytes);
 }
 
 function diffTruncationHint(limitedDiff, formatted, maxLines, maxBytes) {
   if (limitedDiff.filesLimited) return "Increase maxFiles or pass a narrower path.";
   if (limitedDiff.hunksLimited) return "Increase maxHunks or pass a narrower path.";
-  if (formatted.truncated) return "Increase maxLines/maxBytes.";
+  if (limitedDiff.outputLimited || formatted.truncated) return "Increase maxLines/maxBytes or pass a narrower path.";
   return undefined;
-}
-
-function limitDiff(diffText, maxFiles, maxHunks) {
-  if (!diffText) {
-    return { text: "", filesShown: 0, hunksShown: 0, filesLimited: false, hunksLimited: false };
-  }
-
-  const lines = diffText.split("\n");
-  const output = [];
-  let filesShown = 0;
-  let hunksShown = 0;
-  let filesLimited = false;
-  let hunksLimited = false;
-  let includeFile = false;
-  let includeHunk = false;
-  let seenHunkInFile = false;
-
-  for (const line of lines) {
-    if (line.startsWith("diff --git ")) {
-      includeHunk = false;
-      seenHunkInFile = false;
-
-      if (filesShown >= maxFiles) {
-        filesLimited = true;
-        includeFile = false;
-        continue;
-      }
-
-      includeFile = true;
-      filesShown++;
-      output.push(line);
-      continue;
-    }
-
-    if (!includeFile) continue;
-
-    if (line.startsWith("@@ ")) {
-      seenHunkInFile = true;
-      if (hunksShown >= maxHunks) {
-        hunksLimited = true;
-        includeHunk = false;
-        if (output.at(-1) !== omission("hunks")) output.push(omission("hunks"));
-        continue;
-      }
-
-      includeHunk = true;
-      hunksShown++;
-      output.push(line);
-      continue;
-    }
-
-    if (!seenHunkInFile || includeHunk) output.push(line);
-  }
-
-  if (filesLimited) output.push(omission("files"));
-
-  return {
-    text: output.join("\n"),
-    filesShown,
-    hunksShown,
-    filesLimited,
-    hunksLimited,
-  };
 }

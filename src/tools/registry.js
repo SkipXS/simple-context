@@ -216,7 +216,8 @@ export const tools = {
         type: "object",
         properties: {
           url: { type: "string", description: "HTTP(S) URL; localhost/private reachable." },
-          force: { type: "boolean", description: "Skip cache. Default: false." },
+          force: { type: "boolean", description: "Skip cache read and refresh. Default: false." },
+          cache: { type: "boolean", description: "Override fetch cache use. Default: public text only; private literal hosts bypass unless opted in." },
           maxLines: {
             type: "integer",
             minimum: 10,

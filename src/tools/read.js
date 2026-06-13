@@ -151,27 +151,29 @@ async function readFilePreview(args, toolName) {
   const rangeMode = fromLine !== undefined || toLine !== undefined;
   if (lineNumbers && !rangeMode) invalidParams(`${toolName} lineNumbers requires fromLine or toLine`);
   const range = rangeMode ? normalizeLineRange(fromLine, toLine) : undefined;
+  const responseByteLimit = Math.min(byteLimit, MAX_READ_BYTES);
+  const rangeByteLimit = rangeMode ? readRangeContentByteLimit(resolved, range, responseByteLimit, lineNumbers) : MAX_READ_BYTES;
   const { text, limited, rangeLimited, returnedLines, scannedLines, scannedBytes, scanLimited, scanTimedOut } = rangeMode
-    ? await readLineRange(resolved, range.fromLine, range.toLine, lineLimit, MAX_READ_BYTES, MAX_READ_BYTES, READ_RANGE_TIMEOUT_MS)
+    ? await readLineRange(resolved, range.fromLine, range.toLine, lineLimit, rangeByteLimit, MAX_READ_BYTES, READ_RANGE_TIMEOUT_MS)
     : await readLimitedFile(resolved, stat.size, MAX_READ_BYTES);
   const displayText = lineNumbers ? addLineNumbers(text, range?.fromLine ?? 1) : text;
-  const responseByteLimit = Math.min(byteLimit, MAX_READ_BYTES);
   const formatted = rangeMode
     ? formatReadRangeOutput(displayText, resolved, range, lineLimit, responseByteLimit)
     : formatOutput(displayText, lineLimit, responseByteLimit);
-  const contextSavings = savingsForReturnedBytes(stat.size, formatted.returnedBytes);
+  const contextSavings = savingsForReturnedBytes(rangeMode ? formatted.totalBytes : stat.size, formatted.returnedBytes);
   const truncated = formatted.truncated || rangeLimited || limited || scanLimited || scanTimedOut;
+  const emptyReason = readEmptyReason({ rangeMode, sizeBytes: stat.size, text, returnedLines });
   const meta = withResponseMeta({
     path: resolved,
     relativePath: relativePath(resolved),
     sizeBytes: stat.size,
     totalLines: formatted.totalLines,
-    totalBytes: stat.size,
+    totalBytes: rangeMode ? formatted.totalBytes : stat.size,
     ...contextSavings,
     truncated,
-    ...truncationMeta(truncated, readTruncationReason({ formatted, lineLimit, byteLimit, limited, rangeLimited, scanLimited, scanTimedOut }), readTruncationHint({ rangeMode, lineNumbers })),
-    empty: text === "",
-    emptyReason: text === "" ? "empty_file" : undefined,
+    ...truncationMeta(truncated, readTruncationReason({ formatted, lineLimit, byteLimit, limited, rangeMode, rangeLimited, scanLimited, scanTimedOut }), readTruncationHint({ rangeMode, lineNumbers })),
+    empty: emptyReason !== undefined,
+    emptyReason,
     fileReadLimited: limited,
     fromLine: range?.fromLine,
     toLine: range?.toLine === Infinity ? undefined : range?.toLine,
@@ -197,15 +199,28 @@ function savingsForReturnedBytes(totalBytes, returnedBytes) {
   };
 }
 
-function readTruncationReason({ formatted, lineLimit, byteLimit, limited, rangeLimited, scanLimited, scanTimedOut }) {
+function readTruncationReason({ formatted, lineLimit, byteLimit, limited, rangeMode, rangeLimited, scanLimited, scanTimedOut }) {
   if (scanLimited || scanTimedOut) return "scan_limit";
-  if (rangeLimited) return "range_limit";
+  if (rangeLimited || (rangeMode && limited)) return "range_limit";
   if (limited) return "file_limit";
   return formatTruncationReason(formatted, lineLimit, byteLimit) ?? "format_limit";
 }
 
 function readTruncationHint({ rangeMode }) {
   return rangeMode ? "Narrow fromLine/toLine or increase maxLines/maxBytes." : "Increase maxLines/maxBytes or read a smaller file.";
+}
+
+function readRangeContentByteLimit(resolvedPath, range, maxBytes, lineNumbers) {
+  const headerBytes = Buffer.byteLength(`${readRangeHeader(resolvedPath, range)}\n`, "utf8");
+  const lineNumberReserve = lineNumbers ? Math.max(0, String(range.fromLine).length + 2) : 0;
+  return Math.max(0, maxBytes - headerBytes - lineNumberReserve);
+}
+
+function readEmptyReason({ rangeMode, sizeBytes, text, returnedLines }) {
+  if (sizeBytes === 0 && text === "") return "empty_file";
+  if (rangeMode && returnedLines === 0) return "empty_range";
+  if (!rangeMode && text === "") return "empty_file";
+  return undefined;
 }
 
 function formatReadRangeOutput(text, resolvedPath, range, maxLines, maxBytes) {
@@ -223,8 +238,8 @@ function formatReadRangeOutput(text, resolvedPath, range, maxLines, maxBytes) {
   }
 
   const output = `${header}\n${contentText}`;
-  const totalBytes = headerBytes + content.totalBytes;
   const returnedBytes = Buffer.byteLength(output, "utf8");
+  const totalBytes = Math.max(returnedBytes, headerBytes + content.totalBytes);
   const savedBytes = Math.max(0, totalBytes - returnedBytes);
 
   return {

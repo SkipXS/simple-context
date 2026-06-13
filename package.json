@@ -1,6 +1,6 @@
 {
   "name": "simple-context-limiter",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Minimal MCP server that bounds command/log, file, search, repo discovery, web, git diff, and usage output for LLM context",
   "type": "module",
   "main": "server.js",
@@ -23,6 +23,9 @@
     "smoke-test.js",
     "pack-smoke-test.js",
     "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "scripts": {
@@ -32,8 +35,8 @@
     "test:unit": "node --test test/*.test.js",
     "test:smoke": "node smoke-test.js",
     "audit": "npm audit --omit=dev",
-    "release:check": "npm pack --dry-run && node pack-smoke-test.js",
-    "prepack": "npm run check && npm test"
+    "release:check": "npm pack --dry-run --ignore-scripts && node pack-smoke-test.js",
+    "prepack": "npm run check"
   },
   "bin": { "simple-context-limiter": "server.js" },
   "license": "MIT"

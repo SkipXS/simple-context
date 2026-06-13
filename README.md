@@ -191,15 +191,15 @@ Opt out by setting `SIMPLE_CONTEXT_LIMITER_USAGE_LOG=0` or `SIMPLE_CONTEXT_LIMIT
 
 ### `sc-fetch`
 
-Fetches an `http` or `https` URL, strips HTML to readable text, caches the result for 1 hour, and truncates large output. HTML extraction is lightweight text stripping, not browser/JavaScript rendering. Override with `maxLines` up to 500 or `maxBytes` per call.
+Fetches an `http` or `https` URL, strips HTML to readable text, optionally caches the result for 1 hour, and truncates large output. HTML extraction is lightweight text stripping, not browser/JavaScript rendering. Override with `maxLines` up to 500 or `maxBytes` per call.
 
 ```json
-{ "url": "https://example.com/docs", "force": false, "maxLines": 100, "maxBytes": 16384 }
+{ "url": "https://example.com/docs", "force": false, "cache": true, "maxLines": 100, "maxBytes": 16384 }
 ```
 
-Downloads are capped at 10 MB by default before parsing/caching. Override with `SIMPLE_CONTEXT_LIMITER_MAX_FETCH_BYTES` if needed. The visible response starts with a compact `Source: ...` line; `_meta` also includes low-token traceability fields such as `url`, `finalUrl`, `status`, `contentType`, `cached`, `htmlStripped`, and `durationMs`.
+Downloads are capped at 10 MB by default before parsing/caching. Override with `SIMPLE_CONTEXT_LIMITER_MAX_FETCH_BYTES` if needed. The visible response starts with a compact `Source: ...` line; `_meta` also includes low-token traceability fields such as `url`, `finalUrl`, `status`, `contentType`, `charset`, `cached`, `cacheEligible`, `cacheSkippedReason`, `htmlStripped`, and `durationMs`.
 Non-HTTP schemes are blocked by default. Set `SIMPLE_CONTEXT_LIMITER_ALLOW_NON_HTTP_FETCH=1` if you explicitly need schemes such as `data:` for local testing.
-HTTP(S) fetches are not restricted to public internet hosts. `sc-fetch` can access `localhost`, private network addresses, and other HTTP services reachable from the machine running the MCP server. Only enable simple-context-limiter for agents you trust with that local access.
+HTTP(S) fetches are not restricted to public internet hosts. `sc-fetch` can access `localhost`, private network addresses, and other HTTP services reachable from the machine running the MCP server. Literal localhost, loopback, unspecified (`0.0.0.0/8`), link-local, RFC1918/private, and metadata IP hosts are not read from or written to the persistent fetch cache by default; pass `cache: true` for a specific trusted call or set `SIMPLE_CONTEXT_LIMITER_FETCH_CACHE=all` to opt in globally. Pass `cache: false` or set `SIMPLE_CONTEXT_LIMITER_FETCH_CACHE=0` to disable persistent fetch cache use. `force: true` only skips cache reads and refreshes the response; it may still write an eligible refreshed response. Only textual content types are returned; binary/non-text responses are rejected. Text is decoded with the response `charset` when Node's WHATWG `TextDecoder` supports it; responses declaring an unsupported charset return an error rather than guessing.
 
 ### `sc-diff`
 
@@ -311,7 +311,7 @@ Add this to your project `opencode.json` or global `~/.config/opencode/opencode.
   "mcp": {
     "simple-context-limiter": {
       "type": "local",
-      "command": ["npx", "-y", "github:SkipXS/simple-context-limiter"],
+      "command": ["npx", "-y", "github:SkipXS/simple-context-limiter#v1.1.0"],
       "env": {
         "SIMPLE_CONTEXT_LIMITER_SHELL": "bash"
       }
@@ -333,7 +333,7 @@ Add this to `~/.pi/agent/mcp.json`:
   "mcpServers": {
     "simple-context-limiter": {
       "command": "npx",
-      "args": ["-y", "github:SkipXS/simple-context-limiter"],
+      "args": ["-y", "github:SkipXS/simple-context-limiter#v1.1.0"],
       "env": {
         "SIMPLE_CONTEXT_LIMITER_SHELL": "bash"
       },
@@ -357,7 +357,7 @@ On Windows with Git for Windows, use the full path if `bash` is not on `PATH`:
 ### Claude Code
 
 ```bash
-claude mcp add simple-context-limiter -- npx -y github:SkipXS/simple-context-limiter
+claude mcp add simple-context-limiter -- npx -y github:SkipXS/simple-context-limiter#v1.1.0
 ```
 
 If you need a specific command shell for `sc-run`, set `SIMPLE_CONTEXT_LIMITER_SHELL` in the environment that starts Claude Code.
@@ -377,18 +377,18 @@ npm run audit
 
 ## Version Pinning
 
-Use a tag once releases exist.
+Prefer a published npm version or immutable Git tag in client configs so all team members run the same server. The examples above pin the GitHub source to `#v1.1.0`; update that tag intentionally during upgrades. For local development or quick testing you can omit the tag and use `github:SkipXS/simple-context-limiter`, but that follows the default branch and is not reproducible. If you install from npm, use the same pattern with an explicit version, for example `simple-context-limiter@1.1.0`.
 
 OpenCode command:
 
 ```json
-["npx", "-y", "github:SkipXS/simple-context-limiter#v1.0.0"]
+["npx", "-y", "github:SkipXS/simple-context-limiter#v1.1.0"]
 ```
 
 For Pi:
 
 ```json
-"args": ["-y", "github:SkipXS/simple-context-limiter#v1.0.0"]
+"args": ["-y", "github:SkipXS/simple-context-limiter#v1.1.0"]
 ```
 
 ## Environment Variables
@@ -401,11 +401,14 @@ For Pi:
 | `SIMPLE_CONTEXT_LIMITER_MAX_RESPONSE_BYTES` | `65536` | Max formatted response bytes accepted via `maxBytes`; per-call default stays `32768` |
 | `SIMPLE_CONTEXT_LIMITER_MAX_COMMAND_BYTES` | `10485760` | Max command output bytes collected before stopping the process |
 | `SIMPLE_CONTEXT_LIMITER_MAX_FETCH_BYTES` | `10485760` | Max downloaded bytes before parsing/caching |
+| `SIMPLE_CONTEXT_LIMITER_FETCH_CACHE` | public-text only | Set to `0`/`false`/`off` to disable default fetch cache use; set to `all`/`private` to also cache literal private/loopback/link-local hosts by default. Per-call `cache` overrides this. |
 | `SIMPLE_CONTEXT_LIMITER_MAX_READ_BYTES` | `10485760` | Max file bytes read before previewing |
 | `SIMPLE_CONTEXT_LIMITER_MAX_RPC_LINE_BYTES` | `1048576` | Max JSON-RPC input line bytes accepted before rejecting the request |
 | `SIMPLE_CONTEXT_LIMITER_MAX_RPC_BATCH_SIZE` | `50` | Max JSON-RPC requests accepted in one batch |
 | `SIMPLE_CONTEXT_LIMITER_MAX_RPC_BATCH_CONCURRENCY` | `4` | Max JSON-RPC batch items processed concurrently |
 | `SIMPLE_CONTEXT_LIMITER_MAX_RPC_TOOL_CONCURRENCY` | same as batch concurrency | Max `tools/call` executions active globally across all requests and batches |
+| `SIMPLE_CONTEXT_LIMITER_MAX_RPC_TOOL_QUEUE` | `100` | Max queued `tools/call` requests waiting for a tool slot before overload errors (`-32003`) |
+| `SIMPLE_CONTEXT_LIMITER_MAX_RPC_PENDING_REQUESTS` | `100` | Max JSON-RPC input lines being processed concurrently before request overload errors (`-32003`) |
 | `SIMPLE_CONTEXT_LIMITER_READ_RANGE_TIMEOUT_MS` | `120000` | Max time spent scanning for a requested line range |
 | `SIMPLE_CONTEXT_LIMITER_CACHE_MAX_ENTRIES` | `200` | Max cached fetch entries kept on disk |
 | `SIMPLE_CONTEXT_LIMITER_CACHE_MAX_BYTES` | `52428800` | Max cached fetch content bytes kept on disk |
@@ -418,9 +421,17 @@ For Pi:
 
 ## Cache
 
-`sc-fetch` caches fetched content for 1 hour in `~/.simple-context-limiter/cache.json` and prunes old entries on load/save. The cache is capped by entry count and total content bytes. Delete that file anytime to clear the cache.
+`sc-fetch` caches eligible textual fetched content for 1 hour in `~/.simple-context-limiter/cache.json` and prunes old entries on load/save. The cache is capped by entry count and total content bytes. Literal `localhost`, loopback, unspecified (`0.0.0.0/8`), link-local, RFC1918/private IPv4, IPv6 unique-local/link-local, and metadata IP URLs bypass persistent cache by default to avoid storing local secrets. Use per-call `cache: false` to disable cache for one request, `cache: true` to explicitly opt a trusted request in, `SIMPLE_CONTEXT_LIMITER_FETCH_CACHE=0` to disable default cache use, or `SIMPLE_CONTEXT_LIMITER_FETCH_CACHE=all` to cache private literal hosts by default. `force: true` means skip an existing cache entry and refresh; it is not a cache-disable control. Delete this file anytime to clear the cache.
 
 `sc-usage` with `mode: "report"` reads `~/.simple-context-limiter/usage.jsonl`. Delete that file anytime to clear collected usage metadata.
+
+## Privacy and Local Storage
+
+simple-context-limiter does not send telemetry to a hosted service, but it can read local files, run local commands, fetch local/private HTTP services, and write small local state files under `~/.simple-context-limiter/` on the machine running the server. Disable usage logs with `SIMPLE_CONTEXT_LIMITER_USAGE_LOG=0` or `SIMPLE_CONTEXT_LIMITER_DISABLE_USAGE_LOG=1`, disable aggregate stats with `SIMPLE_CONTEXT_LIMITER_STATS=0` or `SIMPLE_CONTEXT_LIMITER_DISABLE_STATS=1`, and disable default fetch caching with `SIMPLE_CONTEXT_LIMITER_FETCH_CACHE=0`. Delete `cache.json`, `usage.jsonl`, or stats files in that directory whenever you want to clear local history.
+
+## Contributing, Security, and Changes
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local development checks, [SECURITY.md](SECURITY.md) for vulnerability reporting and support policy, and [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## Why So Minimal?
 
