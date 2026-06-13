@@ -140,7 +140,7 @@ function formatStatsLine(label, stats, { generated = false } = {}) {
   if (generated && stats.savedBytes === 0) {
     return `${label}: ${stats.calls} calls · bounded/generated output · returned ${formatBytes(stats.returnedBytes)}; raw baseline not estimated`;
   }
-  return `${label}: ${stats.calls} calls · saved ${formatBytes(stats.savedBytes)}/${formatBytes(stats.totalBytes)} (${stats.savedPercent}%) · returned ${formatBytes(stats.returnedBytes)} · ~${formatCompactNumber(stats.estimatedTokensSaved)} tokens`;
+  return `${label}: ${stats.calls} calls · saved ${formatBytes(stats.savedBytes)}/${formatBytes(stats.totalBytes)} (${stats.savedPercent}%) · returned ${formatBytes(stats.returnedBytes)} · ~${formatCompactNumber(stats.estimatedTokensSaved)} tokens saved`;
 }
 
 export function formatStatsReport(stats) {

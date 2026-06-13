@@ -14,7 +14,7 @@ const { formatOutput } = await import("../src/output.js");
 const MAX_TOOLS_LIST_BYTES = 9_000;
 const MAX_TOOL_DESCRIPTION_CHARS = 140;
 const MAX_PROPERTY_DESCRIPTION_CHARS = 100;
-const BANNED_SCHEMA_KEYWORDS = ["oneOf", "allOf", "const", "not"];
+const BANNED_SCHEMA_KEYWORDS = ["anyOf", "oneOf", "allOf", "const", "not"];
 
 function findTool(name) {
   const tool = tools.tools.find((entry) => entry.name === name);
@@ -190,6 +190,25 @@ async function assertToolOutputGoldens() {
     ].join("\n"));
     assert.equal(rangedRead._meta.fromLine, 2);
     assert.equal(rangedRead._meta.toLine, 3);
+
+    const longAPath = join(tempDir, "long-a.txt");
+    const longBPath = join(tempDir, "long-b.txt");
+    await writeFile(longAPath, Array.from({ length: 12 }, (_, index) => `a-${index + 1}`).join("\n"), "utf8");
+    await writeFile(longBPath, Array.from({ length: 12 }, (_, index) => `b-${index + 1}`).join("\n"), "utf8");
+    const truncatedReadMany = await callTool("sc-read", {
+      paths: [longAPath, longBPath],
+      maxLinesPerFile: 20,
+      maxTotalLines: 10,
+      maxTotalBytes: 4096,
+    });
+    const normalizedReadMany = normalizePath(
+      normalizePath(truncatedReadMany.content[0].text, longAPath, "<tmp>/long-a.txt"),
+      longBPath,
+      "<tmp>/long-b.txt",
+    );
+    assert.match(normalizedReadMany, /^\[truncated: .*file-bounded/m);
+    assert.match(normalizedReadMany, /\[retry: raise maxTotalLines\/maxTotalBytes or per-file limits\]/);
+    assert.equal(truncatedReadMany._meta.truncated, true);
   } finally {
     if (tempDir) await rm(tempDir, { recursive: true, force: true });
   }

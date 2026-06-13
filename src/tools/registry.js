@@ -152,7 +152,6 @@ export const tools = {
             description: "paths mode: total line cap. Default: 200.",
           },
         },
-        anyOf: [{ required: ["path"] }, { required: ["paths"] }],
       },
     },
     {

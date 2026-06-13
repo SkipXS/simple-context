@@ -379,7 +379,7 @@ try {
     "sc-usage",
   ]);
   assert.equal(listed.result.tools.every((tool) => tool.inputSchema.additionalProperties === false), true);
-  assert.equal(findSchemaKeyword(listed.result.tools.map((tool) => tool.inputSchema), ["oneOf", "allOf", "const", "not"]), undefined);
+  assert.equal(findSchemaKeyword(listed.result.tools.map((tool) => tool.inputSchema), ["anyOf", "oneOf", "allOf", "const", "not"]), undefined);
   const runSchema = listed.result.tools.find((tool) => tool.name === "sc-run").inputSchema;
   assert.equal(runSchema.properties.maxLines.maximum, 500);
   assert.match(runSchema.properties.maxLines.description, /Content line cap/);
@@ -398,7 +398,7 @@ try {
   assert.deepEqual(usageSchema.properties.mode.enum, ["stats", "report", "guidance"]);
   const readSchema = listed.result.tools.find((tool) => tool.name === "sc-read").inputSchema;
   assert.equal(readSchema.type, "object");
-  assert.deepEqual(readSchema.anyOf, [{ required: ["path"] }, { required: ["paths"] }]);
+  assert.equal(readSchema.anyOf, undefined);
   assert.match(readSchema.properties.path.description, /Primary file/);
   assert.match(readSchema.properties.paths.description, /Standalone list or extra files/);
   assert.match(readSchema.properties.paths.description, /Ranges apply only/);

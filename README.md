@@ -27,7 +27,7 @@ Tool names exposed by `tools/list` are prefixed with `sc-` to avoid collisions w
 
 ## Security Model
 
-simple-context-limiter is intended for trusted local MCP clients. The `sc-run` tool executes shell commands on the machine running the server, and `sc-fetch` can access any HTTP(S) service reachable from that machine, including localhost and private networks. This is by design: the server limits output volume, not the authority of the client. Do not expose it to untrusted agents, prompts, or remote users unless you add your own sandboxing or network policy.
+simple-context-limiter is intended for trusted local MCP clients. `sc-run`/`sc-logs` execute shell commands on the machine running the server, `sc-read`/`sc-search` can access local paths visible to that process, and `sc-fetch` can access any HTTP(S) service reachable from that machine, including localhost and private networks. This is by design: the server limits output volume, not the authority of the client. Do not expose it to untrusted agents, prompts, or remote users unless you run it in a sandbox or add your own policy controls.
 
 ### `sc-run`
 
@@ -413,12 +413,6 @@ For Pi:
 | `SIMPLE_CONTEXT_LIMITER_DISABLE_USAGE_LOG` | unset | Set to `1` to disable local usage logging |
 | `SIMPLE_CONTEXT_LIMITER_STATS` | enabled | Set to `0` to disable aggregate stats writes |
 | `SIMPLE_CONTEXT_LIMITER_DISABLE_STATS` | unset | Set to `1` to disable aggregate stats writes |
-
-## Security / Trust Model
-
-simple-context-limiter intentionally gives trusted agents local capabilities: `sc-run` executes shell commands, `sc-read` and `sc-search` can access local paths visible to the MCP server process, and `sc-fetch` can reach HTTP services available from that machine. Only enable it for clients and agents you trust with that access. Output, downloads, and previews are size-limited to protect model context, not to sandbox the underlying operation.
-
-The missing boundaries around `sc-fetch` to private/internal networks, `sc-read` access outside the current project, and free-form shell execution in `sc-run`/`sc-logs` are by design for this tool. If you need those restrictions, run simple-context-limiter only in a sandboxed environment or add policy controls in the MCP client/runtime that starts it.
 
 ## Cache
 
