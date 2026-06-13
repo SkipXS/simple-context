@@ -55,6 +55,68 @@ async function seedLargeDiff(dir) {
 }
 
 await describe("sc-diff limiting", async () => {
+  await it("lists changed files in files mode with staged awareness", async () => {
+    await withTempRepo(async (dir) => {
+      await seedLargeDiff(dir);
+      await execGit(["add", "file2.txt"], dir);
+
+      const unstaged = await callTool("sc-diff", { mode: "files", maxFiles: 10, maxLines: 20, maxBytes: 4096 });
+      const unstagedText = unstaged.content[0].text;
+      assert.match(unstagedText, /Changed files:/);
+      assert.match(unstagedText, /file1\.txt/);
+      assert.doesNotMatch(unstagedText, /file2\.txt/);
+      assert.equal(unstaged._meta.filesChanged, 3);
+      assert.equal(unstaged._meta.filesChangedKnown, true);
+      assert.equal(unstaged._meta.staged, false);
+
+      const staged = await callTool("sc-diff", { mode: "files", staged: true, maxFiles: 10, maxLines: 20, maxBytes: 4096 });
+      const stagedText = staged.content[0].text;
+      assert.match(stagedText, /file2\.txt/);
+      assert.doesNotMatch(stagedText, /file1\.txt/);
+      assert.equal(staged._meta.filesChanged, 1);
+      assert.equal(staged._meta.filesChangedKnown, true);
+      assert.equal(staged._meta.staged, true);
+    });
+  });
+
+  await it("summarizes diff headers without full diff bodies", async () => {
+    await withTempRepo(async (dir) => {
+      await seedLargeDiff(dir);
+
+      const result = await callTool("sc-diff", { mode: "summary", maxFiles: 1, maxHunks: 2, maxLines: 80, maxBytes: 8192 });
+      const text = result.content[0].text;
+
+      assert.match(text, /Changed files:/);
+      assert.match(text, /Diff stat:/);
+      assert.match(text, /Diff headers:/);
+      assert.match(text, /diff --git a\/file1\.txt b\/file1\.txt/);
+      assert.match(text, /@@ /);
+      assert.doesNotMatch(text, /^[-+]file1 (base|changed)/m);
+      assert.doesNotMatch(text, /diff --git a\/file2\.txt b\/file2\.txt/);
+      assert.equal(result._meta.mode, "summary");
+      assert.equal(result._meta.filesShown, 1);
+      assert.equal(result._meta.filesLimited, true);
+      assert.equal(result._meta.truncated, true);
+    });
+  });
+
+  await it("returns a friendly response outside git repositories", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "scl-diff-non-git-"));
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(dir);
+      const result = await callTool("sc-diff", { mode: "summary", maxLines: 20, maxBytes: 4096 });
+      assert.match(result.content[0].text, /not a git repository/i);
+      assert.equal(result._meta.empty, true);
+      assert.equal(result._meta.emptyReason, "not_git_repository");
+      assert.equal(result._meta.gitRepository, false);
+      assert.equal(result._meta.mode, "summary");
+    } finally {
+      process.chdir(previousCwd);
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   await it("bounds large-ish diffs with maxFiles=1 and maxHunks=1", async () => {
     await withTempRepo(async (dir) => {
       await seedLargeDiff(dir);

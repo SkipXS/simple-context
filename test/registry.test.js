@@ -47,6 +47,21 @@ await describe("tool registry", async () => {
     }
   });
 
+  await it("describes new read/search/diff schema features without drift", () => {
+    const readTool = tools.tools.find((tool) => tool.name === "sc-read");
+    const searchTool = tools.tools.find((tool) => tool.name === "sc-search");
+    const diffTool = tools.tools.find((tool) => tool.name === "sc-diff");
+
+    assert.equal(readTool.inputSchema.properties.ranges.maxItems, 20);
+    assert.match(readTool.inputSchema.properties.lineNumbers.description, /path\/paths default false/);
+    assert.match(readTool.inputSchema.properties.lineNumbers.description, /ranges default true/);
+    assert.equal(searchTool.inputSchema.properties.literal.type, "boolean");
+    assert.equal(searchTool.inputSchema.properties.filesOnly.type, "boolean");
+    assert.deepEqual(diffTool.inputSchema.properties.mode.enum, ["diff", "status", "history", "files", "summary"]);
+    assert.match(diffTool.description, /changed-file list/);
+    assert.match(diffTool.description, /summary/);
+  });
+
   await it("keeps advertised sc-run timeout default aligned with handler behavior", async () => {
     const runSchema = tools.tools.find((tool) => tool.name === "sc-run").inputSchema.properties;
     const command = `${JSON.stringify(process.execPath)} -e "console.log('ok')"`;
@@ -86,7 +101,7 @@ await describe("tool registry", async () => {
     );
     await assert.rejects(
       () => callTool("sc-diff", { mode: "patch" }),
-      /diff mode must be one of: diff, status, history/,
+      /diff mode must be one of: diff, status, history, files, summary/,
     );
     await assert.rejects(
       () => callTool("sc-read", { paths: [] }),

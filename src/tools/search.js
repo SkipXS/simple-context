@@ -132,6 +132,8 @@ export async function searchTool(args) {
     include,
     language,
     contextLines = 0,
+    literal = false,
+    filesOnly = false,
     maxMatches = 100,
     maxLines = MAX_LINES,
     maxBytes = DEFAULT_BYTES,
@@ -152,6 +154,12 @@ export async function searchTool(args) {
   if (language !== undefined && typeof language !== "string") {
     invalidParams("search language must be a string when provided");
   }
+  if (typeof literal !== "boolean") {
+    invalidParams("search literal must be a boolean when provided");
+  }
+  if (typeof filesOnly !== "boolean") {
+    invalidParams("search filesOnly must be a boolean when provided");
+  }
   const contextLimit = validateInteger(contextLines, "search contextLines", 0, 10);
   const limit = validateInteger(maxMatches, "search maxMatches", 1, 1000);
   const lineLimit = validateInteger(maxLines, "search maxLines", 10, 500);
@@ -161,6 +169,8 @@ export async function searchTool(args) {
   const commandSearchPath = relativePath(searchPath);
 
   if (engine === "ast") {
+    if (literal) invalidParams("search literal is only supported for text engine");
+    if (filesOnly) invalidParams("search filesOnly is only supported for text engine");
     const astLanguage = normalizeAstLanguage(language, searchPath, include);
     if (!astLanguage) {
       invalidParams("search language is required when engine is ast unless it can be inferred from path or include");
@@ -177,11 +187,16 @@ export async function searchTool(args) {
     throw error;
   }
 
+  if (filesOnly) {
+    return await searchFilesOnly(rg, pattern, commandSearchPath, include, { literal, contextLines: contextLimit, maxMatches: limit, maxLines: lineLimit, maxBytes: byteLimit });
+  }
+
   if (contextLimit > 0) {
-    return await searchWithContext(rg, pattern, commandSearchPath, include, contextLimit, limit, lineLimit, byteLimit);
+    return await searchWithContext(rg, pattern, commandSearchPath, include, literal, contextLimit, limit, lineLimit, byteLimit);
   }
 
   const rgArgs = ["--line-number", "--with-filename", "--color", "never", "--no-heading"];
+  if (literal) rgArgs.push("--fixed-strings");
   if (include) rgArgs.push("--glob", include);
   rgArgs.push("--", pattern, commandSearchPath);
 
@@ -230,8 +245,8 @@ export async function searchTool(args) {
     : originalBody || "(no matches)";
   const text = body === "(no matches)"
     ? body
-    : addSearchHeader(body, { engine, pattern, searchPath: commandSearchPath, include, shownMatches: shown.length });
-  const originalText = originalBody ? addSearchHeader(originalBody, { engine, pattern, searchPath: commandSearchPath, include, shownMatches: matches.length }) : body;
+    : addSearchHeader(body, { engine, pattern, searchPath: commandSearchPath, include, literal, shownMatches: shown.length });
+  const originalText = originalBody ? addSearchHeader(originalBody, { engine, pattern, searchPath: commandSearchPath, include, literal, shownMatches: matches.length }) : body;
   const formatted = formatOutput(text, lineLimit, byteLimit);
   const searchSavings = matchLimited ? savingsForText(originalText, formatted.text) : savingsMeta(formatted);
   const truncated = matchLimited || formatted.truncated;
@@ -266,14 +281,21 @@ function truncatedMatchesLine(shownMatches) {
   return `[truncated: match limit; ${shownMatches} ${noun} shown; more exist; raise maxMatches or narrow pattern/path/include]`;
 }
 
-function addSearchHeader(body, { engine, pattern, searchPath, include, language, contextLines, shownMatches }) {
-  const noun = shownMatches === 1 ? "match" : "matches";
+function truncatedFilesLine(shownFiles) {
+  const noun = shownFiles === 1 ? "file" : "files";
+  return `[truncated: file limit; ${shownFiles} ${noun} shown; more exist; raise maxMatches or narrow pattern/path/include]`;
+}
+
+function addSearchHeader(body, { engine, pattern, searchPath, include, language, contextLines, literal, filesOnly, shownMatches, shownFiles }) {
+  const count = filesOnly ? shownFiles : shownMatches;
+  const noun = count === 1 ? (filesOnly ? "file" : "match") : (filesOnly ? "files" : "matches");
   const parts = [
-    `Search: ${engine} ${quoteCompact(pattern)} in ${searchPath || "."}`,
+    `${filesOnly ? "Search files" : "Search"}: ${engine} ${quoteCompact(pattern)} in ${searchPath || "."}`,
     include ? `include ${include}` : undefined,
     language ? `lang ${language}` : undefined,
-    contextLines ? `context ${contextLines}` : undefined,
-    `${shownMatches} ${noun} shown`,
+    literal ? "literal" : undefined,
+    contextLines && !filesOnly ? `context ${contextLines}` : undefined,
+    `${count} ${noun} shown`,
   ].filter(Boolean);
   return `${parts.join("; ")}\n${body}`;
 }
@@ -445,7 +467,94 @@ function limitAstContextEntries(entries) {
   ];
 }
 
-async function searchWithContext(rg, pattern, searchPath, include, contextLines, maxMatches, maxLines, maxBytes) {
+async function searchFilesOnly(rg, pattern, searchPath, include, { literal, contextLines, maxMatches, maxLines, maxBytes }) {
+  const rgArgs = ["--files-with-matches", "--color", "never"];
+  if (literal) rgArgs.push("--fixed-strings");
+  if (include) rgArgs.push("--glob", include);
+  rgArgs.push("--", pattern, searchPath);
+
+  const result = await runProcessLines(rg, rgArgs, {
+    cwd: process.cwd(),
+    timeout: 120_000,
+    maxLines: maxMatches + 1,
+    maxBytes: MAX_READ_BYTES,
+  });
+  if (result.code === 1) {
+    const text = "(no matches)";
+    const totalBytes = Buffer.byteLength(text, "utf8");
+    const meta = withResponseMeta({
+      rgPath: rg,
+      filesOnly: true,
+      literal,
+      contextLines,
+      totalFiles: 0,
+      totalFilesKnown: true,
+      shownFiles: 0,
+      totalMatches: 0,
+      totalMatchesKnown: true,
+      shownMatches: 0,
+      totalLines: 1,
+      totalBytes,
+      returnedBytes: totalBytes,
+      savedBytes: 0,
+      savedPercent: 0,
+      estimatedTokensSaved: 0,
+      truncated: false,
+      empty: true,
+      emptyReason: "no_matches",
+      durationMs: result.durationMs,
+    });
+    await recordStats("search", meta);
+    return { content: [{ type: "text", text }], _meta: meta };
+  }
+  if (result.code !== 0 && !result.truncated && !result.outputTooLarge) {
+    commandError(`rg ${rgArgs.join(" ")}`, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge);
+  }
+
+  const files = result.lines.map((line) => relativePath(line));
+  const shown = files.slice(0, maxMatches);
+  const fileLimited = result.truncated || result.outputTooLarge || files.length > maxMatches;
+  const originalBody = files.join("\n");
+  const body = fileLimited
+    ? [...shown, truncatedFilesLine(shown.length)].join("\n")
+    : originalBody || "(no matches)";
+  const text = body === "(no matches)"
+    ? body
+    : addSearchHeader(body, { engine: "text", pattern, searchPath, include, literal, filesOnly: true, shownFiles: shown.length });
+  const originalText = originalBody
+    ? addSearchHeader(originalBody, { engine: "text", pattern, searchPath, include, literal, filesOnly: true, shownFiles: files.length })
+    : body;
+  const formatted = formatOutput(text, maxLines, maxBytes);
+  const searchSavings = fileLimited ? savingsForText(originalText, formatted.text) : savingsMeta(formatted);
+  const truncated = fileLimited || formatted.truncated;
+  const meta = withResponseMeta({
+    rgPath: rg,
+    filesOnly: true,
+    literal,
+    contextLines,
+    totalFiles: fileLimited ? undefined : files.length,
+    totalFilesKnown: !fileLimited,
+    filesRead: fileLimited ? files.length : undefined,
+    shownFiles: shown.length,
+    totalMatches: fileLimited ? undefined : files.length,
+    totalMatchesKnown: !fileLimited,
+    matchesRead: fileLimited ? files.length : undefined,
+    shownMatches: shown.length,
+    totalLines: formatted.totalLines,
+    totalBytes: searchSavings.totalBytes ?? formatted.totalBytes,
+    ...searchSavings,
+    truncated,
+    ...truncationMeta(truncated, searchTruncationReason({ matchLimited: fileLimited, result, formatted, maxLines, maxBytes }), searchTruncationHint),
+    empty: !fileLimited && files.length === 0,
+    emptyReason: !fileLimited && files.length === 0 ? "no_matches" : undefined,
+    durationMs: result.durationMs,
+  });
+  await recordStats("search", meta);
+
+  return toolTextResult(formatted.text, meta, maxBytes);
+}
+
+async function searchWithContext(rg, pattern, searchPath, include, literal, contextLines, maxMatches, maxLines, maxBytes) {
   const started = Date.now();
   const rgArgs = [
     "--line-number",
@@ -460,6 +569,7 @@ async function searchWithContext(rg, pattern, searchPath, include, contextLines,
     "--field-context-separator",
     CONTEXT_SEPARATOR,
   ];
+  if (literal) rgArgs.push("--fixed-strings");
   if (include) rgArgs.push("--glob", include);
   rgArgs.push("--", pattern, searchPath);
 
@@ -478,7 +588,7 @@ async function searchWithContext(rg, pattern, searchPath, include, contextLines,
   const body = limited.text || "(no matches)";
   const text = body === "(no matches)"
     ? body
-    : addSearchHeader(body, { engine: "text", pattern, searchPath, include, contextLines, shownMatches: limited.shownMatches });
+    : addSearchHeader(body, { engine: "text", pattern, searchPath, include, literal, contextLines, shownMatches: limited.shownMatches });
   const formatted = formatOutput(text, maxLines, maxBytes);
   const truncated = limited.matchLimited || result.truncated || result.outputTooLarge || formatted.truncated;
   const meta = withResponseMeta({

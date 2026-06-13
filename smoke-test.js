@@ -393,7 +393,7 @@ try {
   const fetchToolInfo = listed.result.tools.find((tool) => tool.name === "sc-fetch");
   assert.match(fetchToolInfo.description, /no JS rendering/);
   const diffSchema = listed.result.tools.find((tool) => tool.name === "sc-diff").inputSchema;
-  assert.deepEqual(diffSchema.properties.mode.enum, ["diff", "status", "history"]);
+  assert.deepEqual(diffSchema.properties.mode.enum, ["diff", "status", "history", "files", "summary"]);
   assert.equal(diffSchema.properties.maxLines.maximum, 500);
   const usageSchema = listed.result.tools.find((tool) => tool.name === "sc-usage").inputSchema;
   assert.deepEqual(usageSchema.properties.mode.enum, ["stats", "report", "guidance"]);
@@ -920,19 +920,19 @@ try {
   assert.match(read.result.content[0].text, /file line 0/);
   assert.match(read.result.content[0].text, /file line 299/);
 
-  const invalidNumberedPreview = await request("tools/call", {
+  const numberedPreview = await request("tools/call", {
     name: "sc-read",
     arguments: { path: largeFile, lineNumbers: true, maxLines: 20 },
   });
-  assert.equal(invalidNumberedPreview.error.code, -32602);
-  assert.match(invalidNumberedPreview.error.message, /lineNumbers requires/);
+  assert.equal(numberedPreview.result._meta.lineNumbers, true);
+  assert.match(numberedPreview.result.content[0].text, /\n\s*1: |^\s*1: /);
 
   const missingReadPath = await request("tools/call", {
     name: "sc-read",
     arguments: {},
   });
   assert.equal(missingReadPath.error.code, -32602);
-  assert.match(missingReadPath.error.message, /requires path or paths/);
+  assert.match(missingReadPath.error.message, /requires path, paths, or ranges/);
 
   const readMany = await request("tools/call", {
     name: "sc-read",

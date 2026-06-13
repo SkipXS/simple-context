@@ -10,8 +10,11 @@ const READ_MANY_CONCURRENCY = 4;
 
 export async function readTool(args) {
   const options = args ?? {};
-  if (options.path === undefined && options.paths === undefined) {
-    invalidParams("read requires path or paths");
+  if (options.path === undefined && options.paths === undefined && options.ranges === undefined) {
+    invalidParams("read requires path, paths, or ranges");
+  }
+  if (options.ranges !== undefined) {
+    return await readRangesTool(options, "read");
   }
   if (options.paths !== undefined) {
     return await readManyTool({ ...options, paths: normalizeReadPaths(options) }, "read");
@@ -64,7 +67,6 @@ export async function readManyTool(args, toolName = "read") {
   }
   if (typeof lineNumbers !== "boolean") invalidParams(`${toolName} lineNumbers must be a boolean when provided`);
   const rangeMode = fromLine !== undefined || toLine !== undefined;
-  if (lineNumbers && !rangeMode) invalidParams(`${toolName} lineNumbers requires fromLine or toLine`);
   let rangePath;
   if (rangeMode) {
     if (typeof primaryPath === "string" && primaryPath.trim() !== "") rangePath = primaryPath;
@@ -85,7 +87,7 @@ export async function readManyTool(args, toolName = "read") {
     if (typeof filePath !== "string" || filePath.trim() === "") {
       invalidParams(`${toolName} paths must contain non-empty strings`);
     }
-    const previewArgs = { path: filePath, maxLines: lineLimit, maxBytes: byteLimit, lineNumbers: lineNumbers && filePath === rangePath };
+    const previewArgs = { path: filePath, maxLines: lineLimit, maxBytes: byteLimit, lineNumbers };
     if (filePath === rangePath) {
       previewArgs.fromLine = fromLine;
       previewArgs.toLine = toLine;
@@ -113,6 +115,74 @@ export async function readManyTool(args, toolName = "read") {
   await recordStats(toolName, meta);
 
   return toolTextResult(formatted.text, meta, totalLimit);
+}
+
+export async function readRangesTool(args, toolName = "read") {
+  const {
+    ranges,
+    maxLines,
+    maxBytes,
+    maxLinesPerFile = maxLines ?? MAX_LINES,
+    maxBytesPerFile = maxBytes ?? DEFAULT_BYTES,
+    maxTotalLines = 200,
+    maxTotalBytes = DEFAULT_BYTES,
+    lineNumbers,
+  } = args ?? {};
+
+  if (args?.path !== undefined || args?.paths !== undefined || args?.fromLine !== undefined || args?.toLine !== undefined) {
+    invalidParams(`${toolName} ranges cannot be combined with path, paths, fromLine, or toLine`);
+  }
+  if (!Array.isArray(ranges) || ranges.length === 0) invalidParams(`${toolName} ranges must be a non-empty array`);
+  if (ranges.length > 20) invalidParams(`${toolName} ranges must contain at most 20 items`);
+  if (lineNumbers !== undefined && typeof lineNumbers !== "boolean") invalidParams(`${toolName} lineNumbers must be a boolean when provided`);
+
+  const lineLimit = validateInteger(maxLinesPerFile, `${toolName} maxLinesPerFile`, 10, 500);
+  const byteLimit = validateInteger(maxBytesPerFile, `${toolName} maxBytesPerFile`, 1024, MAX_BYTES);
+  const totalLineLimit = validateInteger(maxTotalLines, `${toolName} maxTotalLines`, 10, 500);
+  const totalLimit = validateInteger(maxTotalBytes, `${toolName} maxTotalBytes`, 1024, MAX_BYTES);
+  const numberSnippets = lineNumbers !== false;
+  const previewArgsList = ranges.map((range, index) => normalizeSnippetRange(range, index, lineLimit, byteLimit, numberSnippets, toolName));
+
+  const results = await mapLimited(previewArgsList, READ_MANY_CONCURRENCY, (previewArgs) => readFilePreview(previewArgs, toolName));
+  const formatted = formatReadManyOutput(results, totalLineLimit, totalLimit);
+  const totalBytes = results.reduce((sum, result) => sum + result._meta.response.totalBytes, 0);
+  const contextSavings = savingsForReturnedBytes(totalBytes, formatted.returnedBytes);
+  const truncated = formatted.truncated || results.some((result) => result._meta.truncated);
+  const meta = withResponseMeta({
+    rangesRequested: ranges.length,
+    rangesRead: results.length,
+    maxTotalLines: totalLineLimit,
+    totalLines: formatted.totalLines,
+    totalBytes,
+    ...contextSavings,
+    truncated,
+    ...truncationMeta(truncated, readManyTruncationReason(formatted, totalLineLimit, totalLimit, results), "Increase maxTotalLines/maxTotalBytes or per-snippet limits."),
+    ranges: results.map(readManyFileMeta),
+  });
+  await recordStats(toolName, meta);
+
+  return toolTextResult(formatted.text, meta, totalLimit);
+}
+
+function normalizeSnippetRange(range, index, maxLines, maxBytes, lineNumbers, toolName) {
+  if (range === null || typeof range !== "object" || Array.isArray(range)) {
+    invalidParams(`${toolName} ranges[${index}] must be an object`);
+  }
+  const allowed = new Set(["path", "fromLine", "toLine"]);
+  const unknown = Object.keys(range).find((key) => !allowed.has(key));
+  if (unknown) invalidParams(`${toolName} ranges[${index}] has unknown property: ${unknown}`);
+  if (typeof range.path !== "string" || range.path.trim() === "") {
+    invalidParams(`${toolName} ranges[${index}].path must be a non-empty string`);
+  }
+  normalizeLineRange(range.fromLine, range.toLine, `${toolName} ranges[${index}]`);
+  return {
+    path: range.path,
+    fromLine: range.fromLine,
+    toLine: range.toLine,
+    maxLines,
+    maxBytes,
+    lineNumbers,
+  };
 }
 
 async function mapLimited(items, limit, mapper) {
@@ -150,8 +220,7 @@ async function readFilePreview(args, toolName) {
   }
 
   const rangeMode = fromLine !== undefined || toLine !== undefined;
-  if (lineNumbers && !rangeMode) invalidParams(`${toolName} lineNumbers requires fromLine or toLine`);
-  const range = rangeMode ? normalizeLineRange(fromLine, toLine) : undefined;
+  const range = rangeMode ? normalizeLineRange(fromLine, toLine, toolName) : undefined;
   const responseByteLimit = Math.min(byteLimit, MAX_READ_BYTES);
   const rangeByteLimit = rangeMode ? readRangeContentByteLimit(resolved, range, responseByteLimit, lineNumbers) : MAX_READ_BYTES;
   const { text, limited, rangeLimited, returnedLines, scannedLines, scannedBytes, scanLimited, scanTimedOut, rangeContentBytes } = rangeMode
@@ -167,7 +236,7 @@ async function readFilePreview(args, toolName) {
   const truncated = formatted.truncated || rangeLimited || limited || scanLimited || scanTimedOut;
   const totalBytes = rangeMode
     ? minimumTruncatedTotalBytes(formatted.totalBytes, formatted.returnedBytes, truncated)
-    : stat.size;
+    : nonRangeTotalBytes(stat.size, formatted, lineNumbers, truncated);
   const contextSavings = savingsForReturnedBytes(totalBytes, formatted.returnedBytes);
   const emptyReason = readEmptyReason({ rangeMode, sizeBytes: stat.size, text, returnedLines });
   const meta = withResponseMeta({
@@ -193,6 +262,12 @@ async function readFilePreview(args, toolName) {
     lineNumbers,
   });
   return toolTextResult(formatted.text, meta, responseByteLimit);
+}
+
+function nonRangeTotalBytes(sizeBytes, formatted, lineNumbers, truncated) {
+  if (!lineNumbers) return sizeBytes;
+  const displayTotalBytes = Math.max(sizeBytes, formatted.totalBytes);
+  return minimumTruncatedTotalBytes(displayTotalBytes, formatted.returnedBytes, truncated);
 }
 
 function savingsForReturnedBytes(totalBytes, returnedBytes) {
@@ -305,13 +380,26 @@ function formatReadManyOutput(results, maxLines, maxBytes) {
 
 function readManyOutputSection(result) {
   const name = result._meta.relativePath ?? result._meta.path;
-  const text = stripNestedReadRetryHints(result.content[0].text);
+  const header = readManySectionHeader(result, name);
+  const text = stripNestedReadRetryHints(stripDuplicateSectionHeader(result.content[0].text, header));
   return {
     name,
-    header: `--- ${name} ---`,
+    header,
     text,
     contentLines: text.split("\n"),
   };
+}
+
+function readManySectionHeader(result, name) {
+  if (result._meta.fromLine !== undefined) {
+    const end = result._meta.toLine === undefined ? "end" : result._meta.toLine;
+    return `--- ${name}:${result._meta.fromLine}-${end} ---`;
+  }
+  return `--- ${name} ---`;
+}
+
+function stripDuplicateSectionHeader(text, header) {
+  return text === header ? "" : text.startsWith(`${header}\n`) ? text.slice(header.length + 1) : text;
 }
 
 function stripNestedReadRetryHints(text) {
@@ -456,17 +544,21 @@ function readManyFileMeta(result) {
 
 function addLineNumbers(text, firstLine) {
   if (text === "") return text;
-  const lines = text.split("\n");
+  const hasTrailingNewline = text.endsWith("\n");
+  const body = hasTrailingNewline ? text.slice(0, -1) : text;
+  if (body === "") return text;
+  const lines = body.split("\n");
   const width = String(firstLine + lines.length - 1).length;
-  return lines.map((line, index) => `${String(firstLine + index).padStart(width, " ")}: ${line}`).join("\n");
+  const numbered = lines.map((line, index) => `${String(firstLine + index).padStart(width, " ")}: ${line}`).join("\n");
+  return hasTrailingNewline ? `${numbered}\n` : numbered;
 }
 
-function normalizeLineRange(fromLine, toLine) {
-  const from = fromLine === undefined ? 1 : validateInteger(fromLine, "read fromLine", 1);
-  const to = toLine === undefined ? Infinity : validateInteger(toLine, "read toLine", 1);
+function normalizeLineRange(fromLine, toLine, label = "read") {
+  const from = fromLine === undefined ? 1 : validateInteger(fromLine, `${label} fromLine`, 1);
+  const to = toLine === undefined ? Infinity : validateInteger(toLine, `${label} toLine`, 1);
 
   if (to < from) {
-    invalidParams("read toLine must be greater than or equal to fromLine");
+    invalidParams(`${label} toLine must be greater than or equal to fromLine`);
   }
 
   return { fromLine: from, toLine: to };

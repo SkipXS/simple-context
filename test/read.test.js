@@ -19,6 +19,20 @@ async function withTempFile(content, testFn) {
   }
 }
 
+await describe("sc-read previews", async () => {
+  await it("numbers normal non-ranged previews when lineNumbers is true", async () => {
+    await withTempFile("alpha\nbeta\ngamma\n", async (file) => {
+      const result = await callTool("sc-read", { path: file, lineNumbers: true });
+
+      assert.equal(result._meta.lineNumbers, true);
+      assert.match(result.content[0].text, /^1: alpha\n2: beta\n3: gamma\n?$/);
+      assert.equal(result._meta.sizeBytes, Buffer.byteLength("alpha\nbeta\ngamma\n", "utf8"));
+      assert.equal(result._meta.response.truncated, false);
+      assert.ok(result._meta.response.totalBytes >= result._meta.response.returnedBytes);
+    });
+  });
+});
+
 await describe("sc-read range mode", async () => {
   await it("reports an out-of-file range as empty_range, not empty_file", async () => {
     await withTempFile("alpha\nbeta\n", async (file) => {
@@ -109,5 +123,73 @@ await describe("sc-read range mode", async () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+await describe("sc-read ranges snippet packs", async () => {
+  await it("returns multiple numbered ranges from the same file", async () => {
+    await withTempFile("one\ntwo\nthree\nfour\nfive\n", async (file) => {
+      const result = await callTool("sc-read", {
+        ranges: [
+          { path: file, fromLine: 2, toLine: 3 },
+          { path: file, fromLine: 5, toLine: 5 },
+        ],
+      });
+      const text = result.content[0].text;
+
+      assert.match(text, /--- .*sample\.txt:2-3 ---\n2: two\n3: three/);
+      assert.match(text, /--- .*sample\.txt:5-5 ---\n5: five/);
+      assert.equal(result._meta.rangesRequested, 2);
+      assert.equal(result._meta.ranges.length, 2);
+      assert.equal(result._meta.ranges[0].lineNumbers, true);
+    });
+  });
+
+  await it("returns ranges across files", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "scl-read-test-"));
+    const first = path.join(dir, "first.txt");
+    const second = path.join(dir, "second.txt");
+    await fs.writeFile(first, "a1\na2\na3\n", "utf8");
+    await fs.writeFile(second, "b1\nb2\nb3\n", "utf8");
+    try {
+      const result = await callTool("sc-read", {
+        ranges: [
+          { path: first, fromLine: 1, toLine: 1 },
+          { path: second, fromLine: 2, toLine: 3 },
+        ],
+      });
+      const text = result.content[0].text;
+
+      assert.match(text, /--- .*first\.txt:1-1 ---\n1: a1/);
+      assert.match(text, /--- .*second\.txt:2-3 ---\n2: b2\n3: b3/);
+      assert.deepEqual(result._meta.ranges.map((range) => path.basename(range.path)), ["first.txt", "second.txt"]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  await it("validates invalid ranges cleanly", async () => {
+    await withTempFile("one\ntwo\n", async (file) => {
+      await assert.rejects(
+        () => callTool("sc-read", { ranges: [{ path: file, fromLine: 3, toLine: 2 }] }),
+        /toLine must be greater than or equal to fromLine/,
+      );
+    });
+  });
+
+  await it("applies total caps to range packs", async () => {
+    await withTempFile(Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n"), async (file) => {
+      const result = await callTool("sc-read", {
+        ranges: [
+          { path: file, fromLine: 1, toLine: 20 },
+          { path: file, fromLine: 21, toLine: 40 },
+        ],
+        maxTotalLines: 10,
+      });
+
+      assert.equal(result._meta.truncated, true);
+      assert.match(result._meta.truncation.reason, /line/);
+      assert.match(result.content[0].text, /truncated|omitted/);
+    });
   });
 });

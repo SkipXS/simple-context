@@ -78,13 +78,13 @@ Reads local UTF-8 text files and returns safe previews. Provide `path` for one p
 { "path": "logs/app.log", "maxLines": 100, "maxBytes": 16384 }
 ```
 
-Read a specific 1-based line range after a search result; add `lineNumbers` when citations or review comments need stable line references:
+Read a specific 1-based line range after a search result; add `lineNumbers` when citations or review comments need stable line references. `lineNumbers` can also be used with a normal preview; in that case it numbers the returned preview lines:
 
 ```json
 { "path": "logs/app.log", "fromLine": 28470, "toLine": 28520, "lineNumbers": true, "maxLines": 100, "maxBytes": 16384 }
 ```
 
-Ranged reads include a compact `--- path:start-end ---` header for traceability. `lineNumbers` is intentionally limited to ranged reads so truncated head/tail previews never show misleading source line numbers.
+Ranged reads include a compact `--- path:start-end ---` header for traceability.
 
 For larger targeted source sections, raise `maxLines` up to 500 while keeping `fromLine` and `toLine` narrow enough to stay useful:
 
@@ -94,7 +94,13 @@ For larger targeted source sections, raise `maxLines` up to 500 while keeping `f
 
 File reads are capped at 10 MB by default before formatting. Override with `SIMPLE_CONTEXT_MAX_READ_BYTES` if needed.
 When `fromLine` or `toLine` is used, the file is streamed line-by-line and `maxLines` still caps the returned range. Range scans also stop after the read cap; if the requested line is deeper than that, `_meta.scanLimited` is `true` and the response is marked truncated. `_meta` includes `returnedLines`, `scannedLines`, `scannedBytes`, `rangeLimited`, `scanLimited`, and `scanTimedOut` so callers can retry with a narrower range, search first, or raise `SIMPLE_CONTEXT_MAX_READ_BYTES` for trusted large files.
-Use `path` to identify the ranged file; if `paths` is also provided, those files are included as additional non-ranged previews and per-file range metadata appears in `_meta.files`.
+Use `path` to identify the ranged file; if `paths` is also provided, those files are included as additional previews and per-file metadata appears in `_meta.files`.
+
+Read a snippet pack with up to 20 independent ranges across one or more files. Snippet packs are line-numbered by default (set `lineNumbers:false` to disable) and use the same per-snippet and total caps as multi-file reads:
+
+```json
+{ "ranges": [{ "path": "src/a.js", "fromLine": 10, "toLine": 24 }, { "path": "src/b.js", "fromLine": 40, "toLine": 55 }], "maxTotalBytes": 24000 }
+```
 
 Read multiple known files in one bounded response:
 
@@ -106,11 +112,15 @@ The tool accepts at most 20 merged paths. Each file uses the same preview behavi
 
 ### `sc-search`
 
-Searches local files with ripgrep by default and returns bounded `file:line:match` output. Pass `contextLines` when you need small surrounding context windows. Override with `maxMatches`, `maxLines`, or `maxBytes` per call. `include` is a ripgrep glob, not a regex. When matches are limited, the final line says how many were shown and that more matches exist.
+Searches local files with ripgrep by default and returns bounded `file:line:match` output. Pass `contextLines` when you need small surrounding context windows. Set `literal:true` to treat the text pattern as a fixed string (`rg --fixed-strings`) so regex metacharacters are not interpreted. Set `filesOnly:true` to return only matching file paths (`rg --files-with-matches`); this mode is capped by `maxMatches`, `maxLines`, and `maxBytes`, and `contextLines` does not add surrounding content. Override with `maxMatches`, `maxLines`, or `maxBytes` per call. `include` is a ripgrep glob, not a regex. When matches or files are limited, the final line says how many were shown and that more exist.
 Relative search paths are resolved from the MCP server's `process.cwd()`.
 
 ```json
 { "pattern": "ERROR", "path": "logs", "include": "*.log", "contextLines": 2, "maxMatches": 100, "maxBytes": 16384 }
+```
+
+```json
+{ "pattern": "user@example.com", "path": "logs", "literal": true, "filesOnly": true, "include": "*.log" }
 ```
 
 simple-context does not download ripgrep. It uses the first available binary from:
@@ -203,7 +213,7 @@ HTTP(S) fetches are not restricted to public internet hosts. `sc-fetch` can acce
 
 ### `sc-diff`
 
-Shows a compact Git diff preview, changed-file status, or commit history for the current project. Diff mode includes `git diff --stat` by default, then bounded diff hunks.
+Shows a compact Git diff preview, changed-file list/status, summary, or commit history for the current project. Diff mode includes `git diff --stat` by default, then bounded diff hunks. Outside a Git work tree it returns a friendly empty response with `_meta.emptyReason: "not_git_repository"` instead of a raw Git failure.
 
 ```json
 { "path": "src/tools.js", "maxFiles": 20, "maxHunks": 20, "maxBytes": 16384 }
@@ -215,8 +225,20 @@ Review staged changes instead:
 { "staged": true, "maxFiles": 20, "maxHunks": 20 }
 ```
 
-`sc-diff` only reports tracked working-tree or staged changes covered by `git diff`. It does not include untracked files unless they have been staged. In `mode: "status"`, `staged: false` shows only unstaged tracked changes and `staged: true` shows only staged tracked changes.
+`sc-diff` only reports tracked working-tree or staged changes covered by `git diff`. It does not include untracked files unless they have been staged. In `mode: "files"`, `mode: "summary"`, and `mode: "status"`, `staged: false` shows only unstaged tracked changes and `staged: true` shows only staged tracked changes.
 Relative diff paths are resolved from the MCP server's `process.cwd()`.
+
+Show just the changed file list instead of diff hunks:
+
+```json
+{ "mode": "files", "maxFiles": 50, "maxBytes": 16384 }
+```
+
+Show changed files, diffstat, and diff/file/hunk headers without full diff bodies:
+
+```json
+{ "mode": "summary", "maxFiles": 20, "maxHunks": 100, "maxBytes": 16384 }
+```
 
 Show compact changed-file status instead of diff hunks:
 
@@ -261,7 +283,7 @@ Each tool response reports compact savings stats in `_meta.response`: `totalByte
 
 Aggregate stats are stored globally in `~/.simple-context/stats.json`. They contain only numeric counters grouped by project path and tool name, not commands, file paths, URLs, or content.
 
-The published `tools/list` schemas preserve strict `additionalProperties: false` validation and describe high-risk semantics: `sc-run`/`sc-logs` execute local shell commands, `sc-search` uses regex patterns for text and ast-grep patterns for AST mode, `sc-search.include` is a glob while `sc-discover.include` is a regex, `sc-fetch` is HTTP(S) by default but can reach localhost/private networks, and `sc-diff` status excludes untracked files unless staged.
+The published `tools/list` schemas preserve strict `additionalProperties: false` validation and describe high-risk semantics: `sc-run`/`sc-logs` execute local shell commands, `sc-search` uses regex patterns for text and ast-grep patterns for AST mode, `sc-search.include` is a glob while `sc-discover.include` is a regex, `sc-fetch` is HTTP(S) by default but can reach localhost/private networks, and `sc-diff` files/summary/status exclude untracked files unless staged.
 
 The server also injects short MCP startup instructions that tell the LLM to prefer these bounded tools for shell output, logs, file previews, local search, repo discovery, readable web pages, git previews, and usage guidance. Native shell, read, fetch, or diff tools remain appropriate when complete output, exact stderr/exit behavior, interactivity, raw HTML, or unsupported behavior is specifically needed. If `_meta.truncated` is true, use `_meta.truncation.reason/retryHint` and retry with a narrower query/range/path or higher `maxLines`/`maxBytes` before falling back to native tools.
 

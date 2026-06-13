@@ -29,6 +29,66 @@ await describe("sc-search", async () => {
     });
   });
 
+  await it("searches text as a fixed string when literal is true", async (t) => {
+    if (!await findRg()) return t.skip("rg not available");
+
+    await withTempProject(async (dir) => {
+      await fs.writeFile(path.join(dir, "literal.txt"), "a.b exact\naxb regex-only\n", "utf8");
+
+      const result = await callTool("sc-search", { pattern: "a.b", path: ".", include: "*.txt", literal: true, maxMatches: 5, maxLines: 80, maxBytes: 8192 });
+      const text = result.content[0].text;
+
+      assert.match(text, /Search: text "a\.b" in \.; include \*\.txt; literal; 1 match shown/);
+      assert.match(text, /literal\.txt:1:a\.b exact/);
+      assert.doesNotMatch(text, /axb regex-only/);
+      assert.equal(result._meta.totalMatches, 1);
+      assert.equal(result._meta.shownMatches, 1);
+    });
+  });
+
+  await it("returns only matching file paths when filesOnly is true", async (t) => {
+    if (!await findRg()) return t.skip("rg not available");
+
+    await withTempProject(async (dir) => {
+      await seedSearchProject(dir);
+
+      const result = await callTool("sc-search", { pattern: "needle", path: ".", include: "*.txt", filesOnly: true, contextLines: 2, maxMatches: 5, maxLines: 80, maxBytes: 8192 });
+      const lines = result.content[0].text.split(/\r?\n/);
+
+      assert.match(lines[0], /Search files: text "needle" in \.; include \*\.txt; 2 files shown/);
+      assert.ok(lines.includes("a.txt"));
+      assert.ok(lines.includes("b.txt"));
+      assert.doesNotMatch(result.content[0].text, /alpha needle/);
+      assert.doesNotMatch(result.content[0].text, /needle beta/);
+      assert.equal(result._meta.filesOnly, true);
+      assert.equal(result._meta.shownFiles, 2);
+      assert.equal(result._meta.totalFiles, 2);
+      assert.equal(result._meta.shownMatches, 2);
+    });
+  });
+
+  await it("combines literal and filesOnly with include and path filtering", async (t) => {
+    if (!await findRg()) return t.skip("rg not available");
+
+    await withTempProject(async (dir) => {
+      await fs.mkdir(path.join(dir, "src"));
+      await fs.writeFile(path.join(dir, "src", "one.txt"), "a.b exact\n", "utf8");
+      await fs.writeFile(path.join(dir, "src", "two.txt"), "axb regex-only\n", "utf8");
+      await fs.writeFile(path.join(dir, "outside.txt"), "a.b outside\n", "utf8");
+
+      const result = await callTool("sc-search", { pattern: "a.b", path: "src", include: "*.txt", literal: true, filesOnly: true, maxMatches: 5, maxLines: 80, maxBytes: 8192 });
+      const text = result.content[0].text;
+
+      assert.match(text, /Search files: text "a\.b" in src; include \*\.txt; literal; 1 file shown/);
+      assert.match(text, /src[/\\]one\.txt/);
+      assert.doesNotMatch(text, /two\.txt/);
+      assert.doesNotMatch(text, /outside\.txt/);
+      assert.equal(result._meta.literal, true);
+      assert.equal(result._meta.filesOnly, true);
+      assert.equal(result._meta.shownFiles, 1);
+    });
+  });
+
   await it("reports no matches without treating rg exit 1 as an error", async (t) => {
     if (!await findRg()) return t.skip("rg not available");
 

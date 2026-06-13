@@ -90,7 +90,7 @@ export const tools = {
     {
       name: "read",
       description:
-        "Read bounded UTF-8 file previews. Use path/fromLine/toLine for one ranged file.",
+        "Read bounded UTF-8 file previews. Use path/fromLine/toLine for one ranged file or ranges for snippet packs.",
       inputSchema: {
         type: "object",
         properties: {
@@ -102,9 +102,25 @@ export const tools = {
             items: { type: "string" },
             description: "Standalone list or extra files, max 20. Ranges apply only to path/one file.",
           },
-          maxLines: maxLinesProperty("Content line cap; per-file in paths mode."),
-          lineNumbers: { type: "boolean", description: "Number ranged lines. Default: false." },
-          maxBytes: maxBytesProperty("Byte cap; per-file in paths mode."),
+          ranges: {
+            type: "array",
+            minItems: 1,
+            maxItems: 20,
+            items: {
+              type: "object",
+              properties: {
+                path: { type: "string", description: "Snippet file path." },
+                fromLine: { type: "integer", minimum: 1, description: "First 1-based line for this snippet." },
+                toLine: { type: "integer", minimum: 1, description: "Last 1-based line for this snippet." },
+              },
+              required: ["path"],
+              additionalProperties: false,
+            },
+            description: "Snippet-pack ranges, max 20: { path, fromLine?, toLine? }.",
+          },
+          maxLines: maxLinesProperty("Content line cap; per-file in paths/ranges mode."),
+          lineNumbers: { type: "boolean", description: "Number preview lines. path/paths default false; ranges default true unless set false." },
+          maxBytes: maxBytesProperty("Byte cap; per-file in paths/ranges mode."),
           fromLine: {
             type: "integer",
             minimum: 1,
@@ -115,9 +131,9 @@ export const tools = {
             minimum: 1,
             description: "Last 1-based line for ranged read.",
           },
-          maxLinesPerFile: maxLinesProperty("paths mode: lines per file."),
-          maxBytesPerFile: maxBytesProperty("paths mode: bytes per file."),
-          maxTotalBytes: maxBytesProperty("paths mode: total byte cap."),
+          maxLinesPerFile: maxLinesProperty("paths/ranges mode: lines per file."),
+          maxBytesPerFile: maxBytesProperty("paths/ranges mode: bytes per file."),
+          maxTotalBytes: maxBytesProperty("paths/ranges mode: total byte cap."),
           maxTotalLines: {
             type: "integer",
             minimum: 10,
@@ -135,11 +151,13 @@ export const tools = {
         type: "object",
         properties: {
           engine: { type: "string", enum: ["text", "ast"], description: "Default: text; ast uses ast-grep." },
-          pattern: { type: "string", description: "Regex for text; ast-grep pattern for ast." },
+          pattern: { type: "string", description: "Regex for text unless literal=true; ast-grep pattern for ast." },
           path: { type: "string", description: "Search path. Default: ." },
           include: { type: "string", description: "Include glob, not regex, e.g. *.js." },
           language: { type: "string", description: "ast-grep language when not inferred." },
-          contextLines: { type: "integer", minimum: 0, maximum: 10, default: 0, description: "Context lines. Default: 0." },
+          contextLines: { type: "integer", minimum: 0, maximum: 10, default: 0, description: "Context lines. Ignored when filesOnly=true. Default: 0." },
+          literal: { type: "boolean", description: "Text engine only: treat pattern as a fixed string (ripgrep --fixed-strings). Default: false." },
+          filesOnly: { type: "boolean", description: "Text engine only: return matching file paths; contextLines adds no content. Default: false." },
           maxMatches: {
             type: "integer",
             minimum: 1,
@@ -191,19 +209,19 @@ export const tools = {
     {
       name: "diff",
       description:
-        "Show compact git diff, tracked status, or commit history. Untracked files are excluded.",
+        "Show compact git diff, changed-file list, summary, tracked status, or commit history. Untracked files are excluded.",
       inputSchema: {
         type: "object",
         properties: {
           path: { type: "string", description: "Optional git pathspec; blank omitted." },
-          mode: { type: "string", enum: ["diff", "status", "history"], description: "Mode. Default: diff; status honors staged." },
+          mode: { type: "string", enum: ["diff", "status", "history", "files", "summary"], description: "Mode. Default: diff; files/summary/status honor staged." },
           staged: { type: "boolean", description: "Use staged/cached changes. Default: false." },
           stat: { type: "boolean", description: "Include diffstat. Default: true." },
           maxFiles: {
             type: "integer",
             minimum: 1,
             maximum: 100,
-            description: "diff: file cap. Default: 20.",
+            description: "diff/files/summary: file cap. Default: 20.",
           },
           maxCommits: {
             type: "integer",
@@ -216,7 +234,7 @@ export const tools = {
             minimum: 1,
             maximum: 200,
             default: 20,
-            description: "diff: hunk cap. Default: 20.",
+            description: "diff/summary: hunk cap. Default: 20.",
           },
           maxLines: maxLinesProperty(),
           maxBytes: maxBytesProperty(),
@@ -311,6 +329,23 @@ function validateSchemaValue(toolName, key, value, schema) {
     if (schema.maxItems !== undefined && value.length > schema.maxItems) invalidToolParams(`${toolName} ${key} must contain at most ${schema.maxItems} item(s)`);
     if (schema.items) {
       for (const [index, item] of value.entries()) validateSchemaValue(toolName, `${key}[${index}]`, item, schema.items);
+    }
+    return;
+  }
+
+  if (schema.type === "object") {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) invalidToolParams(`${schemaLabel(toolName, key)} must be an object`);
+    const properties = schema.properties ?? {};
+    const allowed = new Set(Object.keys(properties));
+    if (schema.additionalProperties === false) {
+      const unknown = Object.keys(value).find((property) => !allowed.has(property));
+      if (unknown) invalidToolParams(`Unknown argument for ${schemaLabel(toolName, key)}: ${unknown}`);
+    }
+    for (const required of schema.required ?? []) {
+      if (value[required] === undefined) invalidToolParams(`Missing required argument for ${schemaLabel(toolName, key)}: ${required}`);
+    }
+    for (const [property, propertyValue] of Object.entries(value)) {
+      validateSchemaValue(toolName, `${key}.${property}`, propertyValue, properties[property]);
     }
     return;
   }
