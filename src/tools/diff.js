@@ -46,8 +46,10 @@ export async function diffTool(args) {
   const selectedPaths = namesResult.paths.slice(0, fileLimit);
   const filesLimited = namesResult.limited || namesResult.paths.length > fileLimit;
   const statPromise = stat ? runGit(gitDiffArgs(staged, ["--stat", `--stat-count=${fileLimit}`], normalizedDiffPath)) : undefined;
+  const previewLineLimit = diffPreviewLineLimit(lineLimit);
+  const previewByteLimit = diffPreviewByteLimit(byteLimit);
   const diffPromise = selectedPaths.length > 0
-    ? runGitDiffPreview(gitDiffArgs(staged, [], selectedPaths), hunkLimit, lineLimit, byteLimit)
+    ? runGitDiffPreview(gitDiffArgs(staged, [], selectedPaths), hunkLimit, previewLineLimit, previewByteLimit)
     : Promise.resolve({ text: "", filesShown: 0, hunksShown: 0, hunksLimited: false, outputLimited: false });
   const [statResult, limitedDiff] = await Promise.all([statPromise, diffPromise]);
   const durationMs = Date.now() - started;
@@ -395,6 +397,14 @@ async function runGitDiffPreview(args, maxHunks, maxOutputLines, maxOutputBytes)
       });
     });
   });
+}
+
+function diffPreviewLineLimit(lineLimit) {
+  return Math.min(500, Math.max(lineLimit * 6, lineLimit + 50));
+}
+
+function diffPreviewByteLimit(byteLimit) {
+  return Math.min(MAX_BYTES, Math.max(byteLimit * 4, byteLimit + 4096));
 }
 
 function composeDiffText(statText, diffText) {

@@ -153,22 +153,28 @@ async function readFilePreview(args, toolName) {
   const range = rangeMode ? normalizeLineRange(fromLine, toLine) : undefined;
   const responseByteLimit = Math.min(byteLimit, MAX_READ_BYTES);
   const rangeByteLimit = rangeMode ? readRangeContentByteLimit(resolved, range, responseByteLimit, lineNumbers) : MAX_READ_BYTES;
-  const { text, limited, rangeLimited, returnedLines, scannedLines, scannedBytes, scanLimited, scanTimedOut } = rangeMode
+  const { text, limited, rangeLimited, returnedLines, scannedLines, scannedBytes, scanLimited, scanTimedOut, rangeContentBytes } = rangeMode
     ? await readLineRange(resolved, range.fromLine, range.toLine, lineLimit, rangeByteLimit, MAX_READ_BYTES, READ_RANGE_TIMEOUT_MS)
     : await readLimitedFile(resolved, stat.size, MAX_READ_BYTES);
   const displayText = lineNumbers ? addLineNumbers(text, range?.fromLine ?? 1) : text;
+  const rangeMinimumContentBytes = rangeMode
+    ? minimumRangeContentBytes(rangeContentBytes, { limited, rangeLimited, scanLimited, scanTimedOut })
+    : undefined;
   const formatted = rangeMode
-    ? formatReadRangeOutput(displayText, resolved, range, lineLimit, responseByteLimit)
+    ? formatReadRangeOutput(displayText, resolved, range, lineLimit, responseByteLimit, rangeMinimumContentBytes)
     : formatOutput(displayText, lineLimit, responseByteLimit);
-  const contextSavings = savingsForReturnedBytes(rangeMode ? formatted.totalBytes : stat.size, formatted.returnedBytes);
   const truncated = formatted.truncated || rangeLimited || limited || scanLimited || scanTimedOut;
+  const totalBytes = rangeMode
+    ? minimumTruncatedTotalBytes(formatted.totalBytes, formatted.returnedBytes, truncated)
+    : stat.size;
+  const contextSavings = savingsForReturnedBytes(totalBytes, formatted.returnedBytes);
   const emptyReason = readEmptyReason({ rangeMode, sizeBytes: stat.size, text, returnedLines });
   const meta = withResponseMeta({
     path: resolved,
     relativePath: relativePath(resolved),
     sizeBytes: stat.size,
     totalLines: formatted.totalLines,
-    totalBytes: rangeMode ? formatted.totalBytes : stat.size,
+    totalBytes,
     ...contextSavings,
     truncated,
     ...truncationMeta(truncated, readTruncationReason({ formatted, lineLimit, byteLimit, limited, rangeMode, rangeLimited, scanLimited, scanTimedOut }), readTruncationHint({ rangeMode, lineNumbers })),
@@ -199,6 +205,15 @@ function savingsForReturnedBytes(totalBytes, returnedBytes) {
   };
 }
 
+function minimumRangeContentBytes(rangeContentBytes = 0, { limited, rangeLimited, scanLimited, scanTimedOut }) {
+  if (rangeLimited || scanLimited || scanTimedOut) return rangeContentBytes + 1;
+  return limited ? Math.max(rangeContentBytes, 1) : rangeContentBytes;
+}
+
+function minimumTruncatedTotalBytes(totalBytes, returnedBytes, truncated) {
+  return truncated ? Math.max(totalBytes, returnedBytes + 1) : totalBytes;
+}
+
 function readTruncationReason({ formatted, lineLimit, byteLimit, limited, rangeMode, rangeLimited, scanLimited, scanTimedOut }) {
   if (scanLimited || scanTimedOut) return "scan_limit";
   if (rangeLimited || (rangeMode && limited)) return "range_limit";
@@ -223,7 +238,7 @@ function readEmptyReason({ rangeMode, sizeBytes, text, returnedLines }) {
   return undefined;
 }
 
-function formatReadRangeOutput(text, resolvedPath, range, maxLines, maxBytes) {
+function formatReadRangeOutput(text, resolvedPath, range, maxLines, maxBytes, minimumContentBytes = 0) {
   const header = readRangeHeader(resolvedPath, range);
   const headerBytes = Buffer.byteLength(`${header}\n`, "utf8");
   const contentLimit = Math.max(1024, maxBytes - headerBytes);
@@ -239,7 +254,7 @@ function formatReadRangeOutput(text, resolvedPath, range, maxLines, maxBytes) {
 
   const output = `${header}\n${contentText}`;
   const returnedBytes = Buffer.byteLength(output, "utf8");
-  const totalBytes = Math.max(returnedBytes, headerBytes + content.totalBytes);
+  const totalBytes = Math.max(returnedBytes, headerBytes + content.totalBytes, headerBytes + minimumContentBytes);
   const savedBytes = Math.max(0, totalBytes - returnedBytes);
 
   return {
@@ -500,6 +515,7 @@ function createLineRangeCollector(fromLine, toLine, maxLines, maxBytes) {
   const lines = [];
   let lineNumber = 0;
   let bytes = 0;
+  let rangeContentBytes = 0;
   let limited = false;
   let rangeLimited = false;
   let currentLine = "";
@@ -518,7 +534,9 @@ function createLineRangeCollector(fromLine, toLine, maxLines, maxBytes) {
 
     const nextLine = currentLine + text;
     const separatorBytes = lines.length > 0 ? 1 : 0;
-    if (bytes + separatorBytes + Buffer.byteLength(nextLine, "utf8") > maxBytes) {
+    const nextLineBytes = Buffer.byteLength(nextLine, "utf8");
+    rangeContentBytes = Math.max(rangeContentBytes, bytes + separatorBytes + nextLineBytes);
+    if (bytes + separatorBytes + nextLineBytes > maxBytes) {
       limited = true;
       const remaining = maxBytes - bytes - separatorBytes;
       if (remaining > 0) {
@@ -547,6 +565,7 @@ function createLineRangeCollector(fromLine, toLine, maxLines, maxBytes) {
 
     const separatorBytes = lines.length > 0 ? 1 : 0;
     const nextBytes = separatorBytes + Buffer.byteLength(line, "utf8");
+    rangeContentBytes = Math.max(rangeContentBytes, bytes + nextBytes);
     if (bytes + nextBytes > maxBytes) {
       limited = true;
       return false;
@@ -600,6 +619,7 @@ function createLineRangeCollector(fromLine, toLine, maxLines, maxBytes) {
         scannedBytes,
         scanLimited,
         scanTimedOut,
+        rangeContentBytes,
       };
     },
   };

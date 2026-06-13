@@ -40,15 +40,24 @@ const RESPONSE_META_KEYS = new Set([
 ]);
 
 export function responseMeta(meta) {
+  const truncated = Boolean(meta.truncated);
+  const returnedBytes = meta.returnedBytes;
+  const totalBytes = truncated && Number.isFinite(meta.totalBytes) && Number.isFinite(returnedBytes)
+    ? Math.max(meta.totalBytes, returnedBytes + 1)
+    : meta.totalBytes;
+  const savedBytes = Number.isFinite(totalBytes) && Number.isFinite(returnedBytes)
+    ? Math.max(0, totalBytes - returnedBytes)
+    : meta.savedBytes;
+
   return {
     totalLines: meta.totalLines,
-    totalBytes: meta.totalBytes,
+    totalBytes,
     totalBytesKnown: meta.totalBytesKnown,
-    returnedBytes: meta.returnedBytes,
-    savedBytes: meta.savedBytes,
-    savedPercent: meta.savedPercent,
-    estimatedTokensSaved: meta.estimatedTokensSaved,
-    truncated: Boolean(meta.truncated),
+    returnedBytes,
+    savedBytes,
+    savedPercent: Number.isFinite(totalBytes) && totalBytes > 0 ? Math.round((savedBytes / totalBytes) * 100) : meta.savedPercent,
+    estimatedTokensSaved: Number.isFinite(savedBytes) ? Math.ceil(savedBytes / 4) : meta.estimatedTokensSaved,
+    truncated,
   };
 }
 
@@ -207,7 +216,7 @@ function appendBoundedNotice(text, notice, meta, maxBytes) {
 function updateReturnedBytes(meta, text) {
   const returnedBytes = Buffer.byteLength(text, "utf8");
   const response = meta.response && typeof meta.response === "object" ? { ...meta.response } : {};
-  const totalBytes = Math.max(response.totalBytes ?? returnedBytes, returnedBytes);
+  const totalBytes = Math.max(response.totalBytes ?? returnedBytes, returnedBytes + (meta.truncated ? 1 : 0));
   const savedBytes = Math.max(0, totalBytes - returnedBytes);
 
   response.totalBytes = totalBytes;

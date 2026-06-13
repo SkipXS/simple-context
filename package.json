@@ -36,7 +36,8 @@
     "test:smoke": "node smoke-test.js",
     "audit": "npm audit --omit=dev",
     "release:check": "npm pack --dry-run --ignore-scripts && node pack-smoke-test.js",
-    "prepack": "npm run check"
+    "prepack": "npm run check",
+    "prepublishOnly": "npm run release:check"
   },
   "bin": { "simple-context-limiter": "server.js" },
   "license": "MIT"

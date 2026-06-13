@@ -54,7 +54,8 @@ await describe("sc-read range mode", async () => {
       assert.equal(result._meta.truncated, true);
       assert.equal(result._meta.truncation.reason, "range_limit");
       assert.equal(result._meta.response.returnedBytes, textBytes);
-      assert.ok(result._meta.response.totalBytes >= result._meta.response.returnedBytes);
+      assert.ok(result._meta.response.totalBytes > result._meta.response.returnedBytes);
+      assert.ok(result._meta.response.savedBytes > 0);
       assert.notEqual(result._meta.response.totalBytes, result._meta.sizeBytes);
       assert.ok(result._meta.scannedBytes < result._meta.sizeBytes);
     });
@@ -73,7 +74,20 @@ await describe("sc-read range mode", async () => {
       assert.equal(result._meta.truncated, true);
       assert.equal(result._meta.rangeLimited, true);
       assert.equal(result._meta.response.returnedBytes, textBytes);
-      assert.ok(result._meta.response.totalBytes >= result._meta.response.returnedBytes);
+      assert.ok(result._meta.response.totalBytes > result._meta.response.returnedBytes);
+      assert.ok(result._meta.response.savedBytes > 0);
+    });
+  });
+
+  await it("reports saved bytes when a range is truncated by maxLines", async () => {
+    const content = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`).join("\n");
+    await withTempFile(content, async (file) => {
+      const result = await callTool("sc-read", { path: file, fromLine: 1, toLine: 30, maxLines: 10 });
+
+      assert.equal(result._meta.truncated, true);
+      assert.equal(result._meta.rangeLimited, true);
+      assert.equal(result._meta.response.totalBytes > result._meta.response.returnedBytes, true);
+      assert.ok(result._meta.response.savedBytes > 0);
     });
   });
 
