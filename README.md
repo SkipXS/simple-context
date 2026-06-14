@@ -1,6 +1,6 @@
 # simple-context
 
-A minimal MCP server that keeps large command, log, file, search, repo-discovery, web, and git diff output out of your LLM context. Eight tools, zero dependencies, works in MCP-compatible clients such as Pi, OpenCode, Claude Code, and KiloCode.
+A minimal MCP server that keeps large command, log, file, search, repo-discovery, web, and git diff output out of your LLM context. Eight tools, zero dependencies, works in MCP-compatible clients such as Pi, OpenCode, Codex Desktop/CLI, Claude Code, and KiloCode.
 
 ## Tools
 
@@ -394,6 +394,36 @@ On Windows with Git for Windows, use the full path if `bash` is not on `PATH`:
 "env": {
   "SIMPLE_CONTEXT_SHELL": "C:/Program Files/Git/bin/bash.exe"
 }
+```
+
+### Codex Desktop (Windows)
+
+Codex Desktop uses the same Codex config file as Codex CLI. On Windows, create or edit `%USERPROFILE%\.codex\config.toml` and add:
+
+```toml
+[mcp_servers.simple-context]
+enabled = true
+command = "npx.cmd"
+args = ["-y", "simple-context@1.1.0"]
+
+[mcp_servers.simple-context.env]
+SIMPLE_CONTEXT_SHELL = "C:/Program Files/Git/bin/bash.exe"
+```
+
+Then restart Codex Desktop and check the MCP server list in Settings or with `/mcp` in a chat.
+
+`SIMPLE_CONTEXT_SHELL` is optional. Keep it when you have Git for Windows and want `sc-run`/`sc-logs` to run bash-style commands; omit the env block to use the Windows default shell (`cmd.exe`). If Codex cannot find `npx.cmd`, run `where npx` in PowerShell or Command Prompt and put the full path in `command`, using forward slashes in TOML, for example `C:/Program Files/nodejs/npx.cmd`.
+
+For a local checkout instead of npm, use Node directly:
+
+```toml
+[mcp_servers.simple-context]
+enabled = true
+command = "node"
+args = ["C:/path/to/simple-context/server.js"]
+
+[mcp_servers.simple-context.env]
+SIMPLE_CONTEXT_SHELL = "C:/Program Files/Git/bin/bash.exe"
 ```
 
 ### Claude Code
