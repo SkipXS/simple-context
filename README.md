@@ -398,33 +398,39 @@ On Windows with Git for Windows, use the full path if `bash` is not on `PATH`:
 
 ### Codex Desktop (Windows)
 
-Codex Desktop uses the same Codex config file as Codex CLI. On Windows, create or edit `%USERPROFILE%\.codex\config.toml` and add:
+Codex Desktop uses the same Codex config file as Codex CLI. On Windows, direct Node invocation is the most reliable option because `npx.cmd` wrapper startup can fail the MCP initialize handshake in some Codex Desktop builds.
+
+Create or edit `%USERPROFILE%\.codex\config.toml` and point it at a local checkout:
 
 ```toml
 [mcp_servers.simple-context]
 enabled = true
-command = "npx.cmd"
-args = ["-y", "simple-context@1.1.0"]
-
-[mcp_servers.simple-context.env]
-SIMPLE_CONTEXT_SHELL = "C:/Program Files/Git/bin/bash.exe"
-```
-
-Then restart Codex Desktop and check the MCP server list in Settings or with `/mcp` in a chat.
-
-`SIMPLE_CONTEXT_SHELL` is optional. Keep it when you have Git for Windows and want `sc-run`/`sc-logs` to run bash-style commands; omit the env block to use the Windows default shell (`cmd.exe`). If Codex cannot find `npx.cmd`, run `where npx` in PowerShell or Command Prompt and put the full path in `command`, using forward slashes in TOML, for example `C:/Program Files/nodejs/npx.cmd`.
-
-For a local checkout instead of npm, use Node directly:
-
-```toml
-[mcp_servers.simple-context]
-enabled = true
-command = "node"
+command = "C:/Program Files/nodejs/node.exe"
 args = ["C:/path/to/simple-context/server.js"]
+cwd = "C:/path/to/your/project"
+startup_timeout_sec = 30
+tool_timeout_sec = 120
 
 [mcp_servers.simple-context.env]
 SIMPLE_CONTEXT_SHELL = "C:/Program Files/Git/bin/bash.exe"
 ```
+
+Then restart Codex Desktop, open a new chat, and check the MCP server list with `/mcp`. The server should be enabled and expose tools such as `sc_discover`, `sc_run`, `sc_read`, `sc_search`, and `sc_diff`.
+
+`SIMPLE_CONTEXT_SHELL` is optional. Keep it when you have Git for Windows and want `sc-run`/`sc-logs` to run bash-style commands; omit the env block to use the Windows default shell (`cmd.exe`). Use forward slashes in TOML paths to avoid escaping issues.
+
+If you still want to try the npm package through `npx`, use the full `npx.cmd` path if needed:
+
+```toml
+[mcp_servers.simple-context]
+enabled = true
+command = "C:/Program Files/nodejs/npx.cmd"
+args = ["-y", "simple-context@1.1.0"]
+startup_timeout_sec = 30
+tool_timeout_sec = 120
+```
+
+If `/mcp` shows `simple-context` but a direct test reports `MCP startup failed: handshaking with MCP server failed`, switch back to direct Node invocation.
 
 ### Claude Code
 
