@@ -63,7 +63,7 @@ export const tools = {
     {
       name: "logs",
       description:
-        "Run a command and show bounded error/warning blocks from stdout+stderr, with exit metadata.",
+        "Run verbose diagnostic commands (tests/builds/lints/web/mobile/CI/logs) and show bounded error/warning blocks from stdout+stderr.",
       inputSchema: {
         type: "object",
         properties: {

@@ -6,8 +6,8 @@ A minimal MCP server that keeps large command, log, file, search, repo-discovery
 
 | Tool | Use it for | Instead of |
 |---|---|---|
-| `sc-run` | Running shell commands when full stdout is not needed | `bash`, terminal, `tail -10000 log.txt` |
-| `sc-logs` | Extracting relevant errors from tests, builds, lints, and logs | raw test/build output, full server logs |
+| `sc-run` | Running short shell commands where compact stdout is the desired result | `bash`, terminal, `tail -10000 log.txt` |
+| `sc-logs` | Extracting relevant diagnostics from verbose tests, builds, lints, typechecks, publishes, CI commands, and runtime logs across ecosystems | raw `dotnet test`, `npm test`, `vite build`, `gradle assemble`, `xcodebuild test`, `pytest`, full server logs |
 | `sc-read` | Reading one or more local UTF-8 text files safely | `cat huge.log`, `type huge.log`, repeated file reads |
 | `sc-search` | Searching local files with bounded ripgrep output or optional ast-grep structural search | raw `rg` / `grep` / `sg` commands |
 | `sc-discover` | Repo summaries, file lists, trees, and source outlines | broad globs, recursive trees, several setup reads |
@@ -32,7 +32,7 @@ simple-context is intended for trusted local MCP clients. `sc-run`/`sc-logs` exe
 ### `sc-run`
 
 Runs a shell command and returns stdout. Output is automatically truncated when it exceeds 60 content lines or 32 KB. Override with `maxLines` up to 500 or `maxBytes` per call.
-Commands that exit successfully but write diagnostics to stderr will not include stderr in `sc-run`; use `sc-logs` when stderr or mixed command output matters. In that case the response appends `[stderr omitted: ...]`, and `_meta.stderrOmitted: true` plus `_meta.stderrBytes` report that stderr existed without leaking its text.
+Commands that exit successfully but write diagnostics to stderr will not include stderr in `sc-run`; use `sc-logs` when stderr or mixed command output matters, and prefer `sc-logs` for verbose diagnostics such as tests, builds, lints, typechecks, publishes, CI commands, and runtime logs. In that case the response appends `[stderr omitted: ...]`, and `_meta.stderrOmitted: true` plus `_meta.stderrBytes` report that stderr existed without leaking its text.
 
 ```json
 { "command": "find . -name '*.ts'", "maxLines": 100, "maxBytes": 16384, "timeoutMs": 120000 }
@@ -62,7 +62,7 @@ Command output collection is capped at 10 MB by default before formatting. If a 
 
 ### `sc-logs`
 
-Runs a shell command and extracts relevant error or warning blocks with surrounding context. Use it for tests, builds, lints, compiler output, server logs, and CI-style output where the important lines may appear in the middle. Matching blocks are sorted by severity, then source line; plain-output fallback remains chronological.
+Runs a shell command and extracts relevant error or warning blocks with surrounding context. Prefer it over raw shell or `sc-run` for verbose diagnostic commands where the important lines may appear in the middle: tests, builds, lints, typechecks, publishes, compiler output, server/runtime logs, and CI-style output across ecosystems such as `dotnet test/build/publish`, `npm`/`pnpm`/`yarn test/build/lint`, web CLIs (`vite`, `next`, `tsc`, `eslint`, `jest`, `vitest`, `playwright`), `cargo test/build/check`, `go test`, `pytest`, `mvn`/`gradle test/build`, Android Gradle tasks/`adb logcat`, iOS/macOS `xcodebuild`/`swift`/`fastlane`, and `docker`/`kubectl logs`. Matching blocks are sorted by severity, then source line; plain-output fallback remains chronological.
 
 ```json
 { "command": "npm test", "maxBlocks": 10, "contextLines": 5, "maxLines": 300, "maxBytes": 16384, "timeoutMs": 600000 }
@@ -180,7 +180,7 @@ Use the separate `sc-search` tool for bounded text or AST search with optional c
 { "mode": "outline", "path": "src/tools/run.js", "maxSymbols": 200 }
 ```
 
-Use `sc-logs` for test/check commands when you want error blocks or a compact tail fallback instead of full output.
+Use `sc-logs` for verbose diagnostic commands (tests, checks, builds, lints, typechecks, publishes, CI, and logs) when you want error blocks or a compact tail fallback instead of full output.
 
 ### Usage Reports
 
@@ -285,7 +285,7 @@ Aggregate stats are stored globally in `~/.simple-context/stats.json`. They cont
 
 The published `tools/list` schemas preserve strict `additionalProperties: false` validation and describe high-risk semantics: `sc-run`/`sc-logs` execute local shell commands, `sc-search` uses regex patterns for text and ast-grep patterns for AST mode, `sc-search.include` is a glob while `sc-discover.include` is a regex, `sc-fetch` is HTTP(S) by default but can reach localhost/private networks, and `sc-diff` files/summary/status exclude untracked files unless staged.
 
-The server also injects short MCP startup instructions that tell the LLM to prefer these bounded tools for shell output, logs, file previews, local search, repo discovery, readable web pages, git previews, and usage guidance. Native shell, read, fetch, or diff tools remain appropriate when complete output, exact stderr/exit behavior, interactivity, raw HTML, or unsupported behavior is specifically needed. If `_meta.truncated` is true, use `_meta.truncation.reason/retryHint` and retry with a narrower query/range/path or higher `maxLines`/`maxBytes` before falling back to native tools.
+The server also injects short MCP startup instructions that tell the LLM to prefer these bounded tools for shell output, verbose diagnostic commands/logs, file previews, local search, repo discovery, readable web pages, git previews, and usage guidance. In particular, the instructions steer tests/builds/lints/typechecks/publishes/CI/logs from backend, web, Android, iOS, and infrastructure ecosystems toward `sc-logs`, reserving `sc-run` for short commands where compact stdout is the desired result. Native shell, read, fetch, or diff tools remain appropriate when complete output, exact stderr/exit behavior, interactivity, raw HTML, or unsupported behavior is specifically needed. If `_meta.truncated` is true, use `_meta.truncation.reason/retryHint` and retry with a narrower query/range/path or higher `maxLines`/`maxBytes` before falling back to native tools.
 
 ## Errors
 

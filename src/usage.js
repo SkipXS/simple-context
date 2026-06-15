@@ -198,7 +198,8 @@ function recommendTools(commandSummaries, toolSummaries) {
   const toolMap = new Map(toolSummaries.map((summary) => [summary.name, summary]));
 
   addRecommendation(recommendations, commandMap.get("git-history"), "sc-diff mode=history", "Summarize git log output compactly without adding another tool.");
-  addRecommendation(recommendations, commandMap.get("dependencies"), "sc-run", "Use bounded command output for npm/pnpm/yarn dependency inspection.");
+  addRecommendation(recommendations, commandMap.get("test-build"), "sc-logs", "Use bounded diagnostic blocks for tests, builds, lints, typechecks, publishes, and CI output.");
+  addRecommendation(recommendations, commandMap.get("dependencies"), "sc-run", "Use bounded command output for dependency inspection.");
   addRecommendation(recommendations, commandMap.get("infra-logs"), "sc-logs", "Extract relevant docker/kubectl log blocks.");
   addRecommendation(recommendations, commandMap.get("filesystem-discovery"), "sc-discover", "Use files/tree modes for bounded repository discovery.");
   addRecommendation(recommendations, commandMap.get("file-read"), "sc-read path/fromLine/paths", "Use targeted ranges for one file and paths for additional non-ranged file previews.");
@@ -300,9 +301,15 @@ export function classifyCommand(command) {
 
   if (/\bgit\s+(log|show|blame|reflog|shortlog)\b/.test(normalized)) return "git-history";
   if (/\bgit\s+(diff|status|stash|branch|remote)\b/.test(normalized)) return "git-review";
-  if (/\b(?:npm|pnpm|yarn|bun)\s+(?:test|run\s+(?:test|check|lint|build)|check|lint|build)\b/.test(normalized)) return "test-build";
-  if (/\b(?:npm|pnpm|yarn|bun)\s+(?:ls|list|why|outdated|audit|info|view)\b/.test(normalized)) return "dependencies";
-  if (/\b(?:docker|kubectl)\s+logs\b|\bkubectl\s+(?:get|describe)\b/.test(normalized)) return "infra-logs";
+  if (/\b(?:npm|pnpm|yarn|bun)\s+(?:test|run\s+(?:test|check|lint|build|typecheck|type-check)|check|lint|build|typecheck|type-check)\b/.test(normalized)) return "test-build";
+  if (/\b(?:vite|next|nuxt|astro|ng|nx)\s+(?:test|build|lint|check)\b/.test(normalized)) return "test-build";
+  if (/\b(?:tsc|vue-tsc|svelte-check|eslint|jest|vitest|playwright\s+test|cypress\s+run)\b/.test(normalized)) return "test-build";
+  if (/\bdotnet\s+(?:test|build|publish|pack|format|msbuild|clean)\b/.test(normalized)) return "test-build";
+  if (/\b(?:cargo\s+(?:test|build|check|clippy)|go\s+(?:test|build|vet)|pytest|python(?:3)?\s+-m\s+pytest|tox|ruff|mypy|pyright|mvnw?\s+(?:test|package|verify|install)|gradlew?\s+(?:test|build|check|lint|assemble\w*|bundle\w*|connected\w*|\S*test\S*|\S*lint\S*|\S*assemble\S*|\S*bundle\S*|\S*connected\S*))\b/.test(normalized)) return "test-build";
+  if (/\b(?:xcodebuild\s+(?:test|build|archive|analyze)|swift\s+(?:test|build)|swiftlint|fastlane\b|make\s+(?:test|build|check|lint)|cmake\s+--build|ctest\b|ninja(?:\s|$))/.test(normalized)) return "test-build";
+  if (/\b(?:npm|pnpm|yarn|bun)\s+(?:ls|list|why|outdated|audit|info|view|install|ci|add)\b/.test(normalized)) return "dependencies";
+  if (/\bdotnet\s+(?:restore|list\s+package|add\s+\S+\s+package)\b|\bcargo\s+(?:add|update|tree)\b/.test(normalized)) return "dependencies";
+  if (/\b(?:docker|kubectl)\s+logs\b|\bkubectl\s+(?:get|describe)\b|\badb\s+logcat\b|\bxcrun\s+simctl\b.*\blog\s+stream\b|\blog\s+stream\b/.test(normalized)) return "infra-logs";
   if (/\b(?:rg|grep|ag)\b/.test(normalized)) return "search-discovery";
   if (/\b(?:find|fd|tree|du|ls)\b/.test(normalized)) return "filesystem-discovery";
   if (/\b(?:cat|type|get-content)\b/.test(normalized)) return "file-read";
