@@ -10,8 +10,16 @@ const READ_MANY_CONCURRENCY = 4;
 
 export async function readTool(args) {
   const options = args ?? {};
-  if (options.path === undefined && options.paths === undefined && options.ranges === undefined) {
-    invalidParams("read requires path, paths, or ranges");
+  if (options.path === undefined && options.paths === undefined && options.ranges === undefined && options.spec === undefined) {
+    invalidParams("read requires path, paths, ranges, or spec");
+  }
+  if (options.spec !== undefined) {
+    const ranges = parseRangeSpec(options.spec, "read");
+    const { spec: _spec, ...rangeOptions } = options;
+    if (rangeOptions.path !== undefined || rangeOptions.paths !== undefined || rangeOptions.ranges !== undefined || rangeOptions.fromLine !== undefined || rangeOptions.toLine !== undefined) {
+      invalidParams("read spec cannot be combined with path, paths, ranges, fromLine, or toLine");
+    }
+    return await readRangesTool({ ...rangeOptions, ranges }, "read");
   }
   if (options.ranges !== undefined) {
     return await readRangesTool(options, "read");
@@ -24,6 +32,23 @@ export async function readTool(args) {
   await recordStats("read", result._meta);
 
   return result;
+}
+
+export async function readSnippetsTool(args) {
+  const options = args ?? {};
+  if (options.spec === undefined && options.ranges === undefined) {
+    invalidParams("snippets requires spec or ranges");
+  }
+
+  const ranges = [];
+  if (options.spec !== undefined) ranges.push(...parseRangeSpec(options.spec, "snippets"));
+  if (options.ranges !== undefined) {
+    if (!Array.isArray(options.ranges)) invalidParams("snippets ranges must be a non-empty array");
+    ranges.push(...options.ranges);
+  }
+
+  const { spec: _spec, ranges: _ranges, ...rangeOptions } = options;
+  return await readRangesTool({ ...rangeOptions, ranges }, "snippets");
 }
 
 function normalizeReadPaths(args) {
@@ -51,7 +76,7 @@ export async function readManyTool(args, toolName = "read") {
     paths,
     maxLines,
     maxBytes,
-    maxLinesPerFile = maxLines ?? MAX_LINES,
+    maxLinesPerFile,
     maxBytesPerFile = maxBytes ?? DEFAULT_BYTES,
     maxTotalLines = 200,
     maxTotalBytes = DEFAULT_BYTES,
@@ -77,9 +102,9 @@ export async function readManyTool(args, toolName = "read") {
     normalizeLineRange(fromLine, toLine);
   }
 
-  const lineLimit = validateInteger(maxLinesPerFile, `${toolName} maxLinesPerFile`, 10, 500);
+  const lineLimit = validateReadLineCap(maxLinesPerFile ?? maxLines ?? MAX_LINES, `${toolName} ${maxLinesPerFile !== undefined ? "maxLinesPerFile" : "maxLinesPerFile/maxLines"}`, { pack: true });
   const byteLimit = validateInteger(maxBytesPerFile, `${toolName} maxBytesPerFile`, 1024, MAX_BYTES);
-  const totalLineLimit = validateInteger(maxTotalLines, `${toolName} maxTotalLines`, 10, 500);
+  const totalLineLimit = validateReadLineCap(maxTotalLines, `${toolName} maxTotalLines`, { pack: true });
   const totalLimit = validateInteger(maxTotalBytes, `${toolName} maxTotalBytes`, 1024, MAX_BYTES);
   const previewArgsList = [];
 
@@ -117,12 +142,35 @@ export async function readManyTool(args, toolName = "read") {
   return toolTextResult(formatted.text, meta, totalLimit);
 }
 
+function parseRangeSpec(spec, toolName) {
+  if (typeof spec !== "string" || spec.trim() === "") {
+    invalidParams(`${toolName} spec must be a non-empty string like file:1-80,file2:20-60`);
+  }
+
+  const parts = spec.split(",").map((part) => part.trim());
+  if (parts.some((part) => part === "")) {
+    invalidParams(`${toolName} spec contains an empty item; expected comma-separated file:from-to ranges`);
+  }
+  if (parts.length > 20) invalidParams(`${toolName} spec must contain at most 20 ranges`);
+
+  return parts.map((part, index) => {
+    const match = /^(.*):(\d+)(?:-(\d+))?$/.exec(part);
+    if (!match || match[1].trim() === "") {
+      invalidParams(`${toolName} spec item ${index + 1} must match file:from-to, for example src/app.js:1-80`);
+    }
+    const fromLine = Number(match[2]);
+    const toLine = match[3] === undefined ? fromLine : Number(match[3]);
+    normalizeLineRange(fromLine, toLine, `${toolName} spec item ${index + 1}`);
+    return { path: match[1].trim(), fromLine, toLine };
+  });
+}
+
 export async function readRangesTool(args, toolName = "read") {
   const {
     ranges,
     maxLines,
     maxBytes,
-    maxLinesPerFile = maxLines ?? MAX_LINES,
+    maxLinesPerFile,
     maxBytesPerFile = maxBytes ?? DEFAULT_BYTES,
     maxTotalLines = 200,
     maxTotalBytes = DEFAULT_BYTES,
@@ -136,9 +184,9 @@ export async function readRangesTool(args, toolName = "read") {
   if (ranges.length > 20) invalidParams(`${toolName} ranges must contain at most 20 items`);
   if (lineNumbers !== undefined && typeof lineNumbers !== "boolean") invalidParams(`${toolName} lineNumbers must be a boolean when provided`);
 
-  const lineLimit = validateInteger(maxLinesPerFile, `${toolName} maxLinesPerFile`, 10, 500);
+  const lineLimit = validateReadLineCap(maxLinesPerFile ?? maxLines ?? MAX_LINES, `${toolName} ${maxLinesPerFile !== undefined ? "maxLinesPerFile" : "maxLinesPerFile/maxLines"}`, { pack: true });
   const byteLimit = validateInteger(maxBytesPerFile, `${toolName} maxBytesPerFile`, 1024, MAX_BYTES);
-  const totalLineLimit = validateInteger(maxTotalLines, `${toolName} maxTotalLines`, 10, 500);
+  const totalLineLimit = validateReadLineCap(maxTotalLines, `${toolName} maxTotalLines`, { pack: true });
   const totalLimit = validateInteger(maxTotalBytes, `${toolName} maxTotalBytes`, 1024, MAX_BYTES);
   const numberSnippets = lineNumbers !== false;
   const previewArgsList = ranges.map((range, index) => normalizeSnippetRange(range, index, lineLimit, byteLimit, numberSnippets, toolName));
@@ -174,6 +222,9 @@ function normalizeSnippetRange(range, index, maxLines, maxBytes, lineNumbers, to
   if (typeof range.path !== "string" || range.path.trim() === "") {
     invalidParams(`${toolName} ranges[${index}].path must be a non-empty string`);
   }
+  if (toolName === "snippets" && range.fromLine === undefined && range.toLine === undefined) {
+    invalidParams(`${toolName} ranges[${index}] must include fromLine or toLine for a focused snippet range`);
+  }
   normalizeLineRange(range.fromLine, range.toLine, `${toolName} ranges[${index}]`);
   return {
     path: range.path,
@@ -201,12 +252,23 @@ async function mapLimited(items, limit, mapper) {
   return results;
 }
 
+function validateReadLineCap(value, name, { pack = false } = {}) {
+  if (typeof value === "number" && Number.isInteger(value) && value > 500) {
+    const parameter = name.split(" ").pop();
+    const splitHint = pack
+      ? "For multi-file or multi-range packs, split the request or use smaller ranges/per-file limits."
+      : "Use a smaller range or split the request if you need more context.";
+    invalidParams(`${name} must be between 10 and 500; set ${parameter} to 500 or less. ${splitHint}`);
+  }
+  return validateInteger(value, name, 10, 500);
+}
+
 async function readFilePreview(args, toolName) {
   const { path: filePath, maxLines = MAX_LINES, maxBytes = DEFAULT_BYTES, fromLine, toLine, lineNumbers = false } = args ?? {};
   if (typeof filePath !== "string" || filePath.trim() === "") {
     invalidParams(`${toolName} requires a non-empty path string`);
   }
-  const lineLimit = validateInteger(maxLines, `${toolName} maxLines`, 10, 500);
+  const lineLimit = validateReadLineCap(maxLines, `${toolName} maxLines`);
   const byteLimit = validateInteger(maxBytes, `${toolName} maxBytes`, 1024, MAX_BYTES);
   if (typeof lineNumbers !== "boolean") invalidParams(`${toolName} lineNumbers must be a boolean when provided`);
 

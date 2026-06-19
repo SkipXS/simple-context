@@ -77,7 +77,7 @@ function accountForDiagnosticOverhead(savings) {
   };
 }
 
-function commandStatusLine(result) {
+export function commandStatusLine(result) {
   const status = result.timedOut
     ? "timed out"
     : result.signal
@@ -86,7 +86,7 @@ function commandStatusLine(result) {
   return `Command ${status} in ${result.durationMs}ms`;
 }
 
-function combinedCommandOutput(result) {
+export function combinedCommandOutput(result) {
   if (typeof result.output === "string") return result.output.trimEnd();
 
   const parts = [];
@@ -100,7 +100,7 @@ function combinedCommandOutput(result) {
   return parts.join("\n");
 }
 
-function extractLogBlocks(text, maxBlocks, contextLines, maxLines) {
+export function extractLogBlocks(text, maxBlocks, contextLines, maxLines) {
   const lines = text ? text.split("\n") : [];
   if (lines.length === 0) {
     return { text: "(no output)", blocksFound: 0, blocksShown: 0, truncated: false, fallback: true };

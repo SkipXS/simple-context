@@ -1,6 +1,6 @@
 # simple-context
 
-A minimal MCP server that keeps large command, log, file, search, repo-discovery, web, and git diff output out of your LLM context. Eight tools, zero dependencies, works in MCP-compatible clients such as Pi, OpenCode, Codex Desktop/CLI, Claude Code, and KiloCode.
+A minimal MCP server that keeps large command, log, file, search, repo-discovery, web, git, validation, process, environment, path-resolution, and usage output out of your LLM context. Fifteen tools, zero dependencies, works in MCP-compatible clients such as Pi, OpenCode, Codex Desktop/CLI, Claude Code, and KiloCode.
 
 ## Tools
 
@@ -8,11 +8,18 @@ A minimal MCP server that keeps large command, log, file, search, repo-discovery
 |---|---|---|
 | `sc-run` | Running short shell commands where compact stdout is the desired result | `bash`, terminal, `tail -10000 log.txt` |
 | `sc-logs` | Extracting relevant diagnostics from verbose tests, builds, lints, typechecks, publishes, CI commands, and runtime logs across ecosystems | raw `dotnet test`, `npm test`, `vite build`, `gradle assemble`, `xcodebuild test`, `pytest`, full server logs |
-| `sc-read` | Reading one or more local UTF-8 text files safely | `cat huge.log`, `type huge.log`, repeated file reads |
+| `sc-validate` | Auto-detecting and running one safe project validation command, or a custom explicit validation command | guessing check scripts, raw verbose validation output |
+| `sc-process` | Starting/stopping sc-managed dev servers, or inspecting their status/logs without project/source-tree writes | ad-hoc background shells, lost server logs |
+| `sc-read` | Reading local UTF-8 file previews, line ranges, multi-file packs, or compact range specs | `cat huge.log`, `type huge.log`, repeated file reads |
+| `sc-snippets` | Reading focused line-range snippets from compact specs or range objects | many separate ranged file reads |
 | `sc-search` | Searching local files with bounded ripgrep output or optional ast-grep structural search | raw `rg` / `grep` / `sg` commands |
-| `sc-discover` | Repo summaries, file lists, trees, and source outlines | broad globs, recursive trees, several setup reads |
+| `sc-search-plan` | Planning a bounded text search with matching files, counts, and next-step suggestions | broad searches before deciding where to read |
+| `sc-discover` | Repo summaries, file lists, trees, inventory, and source outlines | broad globs, recursive trees, several setup reads |
+| `sc-resolve` | Resolving a path or suggesting close candidates under the project/root | manual `find` attempts after path typos |
 | `sc-fetch` | Fetching web pages as readable text | `webfetch`, raw HTML downloads |
-| `sc-diff` | Reviewing compact Git diffs, changed-file status, or commit history | raw `git diff` / `git status` / `git log` output |
+| `sc-diff` | Inspecting path-scoped Git patches, hunk/detail summaries, changed-file status, or file history | raw `git diff` / `git status` / `git log -- <path>` output |
+| `sc-git` | Repo-wide workflow overview, precommit checks, and decorated history dashboard | piecing together `git status`, branch, diff summary, and log commands |
+| `sc-env` | Checking cwd/root, platform/shell, package scripts, and tool versions | ad-hoc environment preflight commands |
 | `sc-usage` | Viewing savings stats, local usage reports, or guidance | manual accounting, guessing from project trees alone |
 
 Tool names exposed by `tools/list` are prefixed with `sc-` to avoid collisions with built-in client tools such as `read` or `search`. Use the prefixed names for all calls; unprefixed legacy names are not exposed or accepted.
@@ -27,7 +34,7 @@ Tool names exposed by `tools/list` are prefixed with `sc-` to avoid collisions w
 
 ## Security Model
 
-simple-context is intended for trusted local MCP clients. `sc-run`/`sc-logs` execute shell commands on the machine running the server, `sc-read`/`sc-search` can access local paths visible to that process, and `sc-fetch` can access any HTTP(S) service reachable from that machine, including localhost and private networks. This is by design: the server limits output volume, not the authority of the client. `SIMPLE_CONTEXT_FETCH_PUBLIC_ONLY` and the default private-host cache bypass are best-effort convenience guards, not a security sandbox or SSRF boundary. Do not expose it to untrusted agents, prompts, or remote users unless you run it in a sandbox or add your own network/policy controls.
+simple-context is intended for trusted local MCP clients. Command-executing tools (`sc-run`, `sc-logs`, `sc-validate`, `sc-process`, and `sc-env`) run local commands on the machine running the server; `sc-env` probes requested tools by executing version commands found on `PATH`. `sc-read`/`sc-search` can access local paths visible to that process, and `sc-fetch` can access any HTTP(S) service reachable from that machine, including localhost and private networks. This is by design: the server limits output volume, not the authority of the client. `SIMPLE_CONTEXT_FETCH_PUBLIC_ONLY` and the default private-host cache bypass are best-effort convenience guards, not a security sandbox or SSRF boundary. Do not expose it to untrusted agents, prompts, or remote users unless you run it in a sandbox or add your own network/policy controls.
 
 ### `sc-run`
 
@@ -70,6 +77,30 @@ Runs a shell command and extracts relevant error or warning blocks with surround
 
 Unlike `sc-run`, non-zero exits return a normal tool response with `exitCode`, `durationMs`, `blocksFound`, and savings metadata in `_meta`. If no error-like patterns are found, `sc-logs` returns a compact tail fallback. `sc-logs.maxLines` accepts up to 500 lines because CI/test diagnostics often need more room; `maxBytes` still caps the formatted response at 32 KB.
 
+### `sc-validate`
+
+Runs one validation command with compact `sc-logs`-style diagnostics. `mode:"auto"` picks a safe project check when it can infer one; choose `npm`, `go`, `python`, or `ruby` to constrain detection. An explicit shell command is accepted only with `mode:"custom"`.
+
+```json
+{ "mode": "auto", "maxLines": 120, "maxBytes": 16384, "timeoutMs": 600000 }
+```
+
+```json
+{ "mode": "custom", "command": "npm run check", "maxLines": 200, "timeoutMs": 600000 }
+```
+
+### `sc-process`
+
+Manages development servers that were started through `sc-process`. `start` and `stop` have managed-process side effects: `start` launches a tracked command with private log capture, and `stop` requests termination of an owned tracked process. `list`, `status`, and `logs` do not start or stop managed processes and do not mutate the project/source tree; they inspect the private sc-process registry/logs, though registry/log metadata housekeeping may update private files under simple-context storage.
+
+```json
+{ "mode": "start", "command": "npm run dev", "name": "web", "timeoutMs": 1000, "maxLines": 120 }
+```
+
+```json
+{ "mode": "logs", "id": "web", "maxLines": 120, "maxBytes": 16384 }
+```
+
 ### `sc-read`
 
 Reads local UTF-8 text files and returns safe previews. Provide `path` for one primary file or `paths` for a standalone list of up to 20 files; if both are provided, they are merged as `[path, ...paths]` with duplicates ignored. Output is automatically truncated when it exceeds 60 content lines or 32 KB. Override with `maxLines` up to 500 or `maxBytes` per call. In multi-file mode, `maxLines` and `maxBytes` act as per-file defaults unless `maxLinesPerFile` or `maxBytesPerFile` are set. `sc-read` allows up to 500 lines for targeted single-file ranges while keeping the 32 KB response cap.
@@ -102,6 +133,12 @@ Read a snippet pack with up to 20 independent ranges across one or more files. S
 { "ranges": [{ "path": "src/a.js", "fromLine": 10, "toLine": 24 }, { "path": "src/b.js", "fromLine": 40, "toLine": 55 }], "maxTotalBytes": 24000 }
 ```
 
+The same snippet pack can be expressed with the compact `spec` string (`file:start-end,file2:start-end`) when it is easier to paste from search results:
+
+```json
+{ "spec": "src/a.js:10-24,src/b.js:40-55", "maxLinesPerFile": 80, "maxTotalBytes": 24000 }
+```
+
 Read multiple known files in one bounded response:
 
 ```json
@@ -109,6 +146,18 @@ Read multiple known files in one bounded response:
 ```
 
 The tool accepts at most 20 merged paths. Each file uses the same preview behavior as single-file reads, then the combined response is capped by `maxTotalBytes` and `maxTotalLines`. If a multi-file response is globally truncated, visible file content stays under an explicit `--- file ---` header to avoid misattribution.
+
+### `sc-snippets`
+
+Reads only focused line-range snippets. Use it when you already have `file:line` anchors and do not need whole-file previews. It accepts `spec` or `ranges`; each `ranges[]` entry must include `fromLine` or `toLine`. It line-numbers snippets by default and rejects broad `path`/`paths` arguments so accidental full-file reads are avoided.
+
+```json
+{ "spec": "src/parser.js:40-90,src/lexer.js:10-30", "maxLinesPerFile": 80, "maxTotalBytes": 16000 }
+```
+
+```json
+{ "ranges": [{ "path": "src/parser.js", "fromLine": 40, "toLine": 90 }], "lineNumbers": true }
+```
 
 ### `sc-search`
 
@@ -151,6 +200,20 @@ pip install ast-grep-cli
 
 simple-context discovers `sg` or `ast-grep` on `PATH`, or use `SIMPLE_CONTEXT_AST_GREP_PATH` to point at the binary. It intentionally does not run `npx`.
 
+### `sc-search-plan`
+
+Plans a bounded text search before you ask for matching lines. It reports matching files, counts, and next-step suggestions so agents can pick narrower `sc-search` or `sc-snippets` calls. It is text-only: no `engine`, `language`, `filesOnly`, or `mode` arguments.
+
+```json
+{ "pattern": "TODO|FIXME", "path": "src", "include": "*.js", "maxMatches": 100, "maxLines": 120 }
+```
+
+Use `literal:true` for fixed strings and set `contextLines` as a hint for follow-up search commands:
+
+```json
+{ "pattern": "user@example.com", "path": "logs", "literal": true, "contextLines": 2 }
+```
+
 ### `sc-discover`
 
 Use this before broad file reads or recursive shell commands. Pick a mode for the discovery shape you need:
@@ -158,6 +221,7 @@ Use this before broad file reads or recursive shell commands. Pick a mode for th
 - `summary` summarizes package metadata, scripts, configs, a compact README preview, and tracked-file count.
 - `files` lists tracked files with optional regex filtering.
 - `tree` shows a bounded tree and skips heavy/noisy folders like `.git`, `node_modules`, `.pi`, and `.opencode`.
+- `inventory` summarizes filesystem files under `path` by extension/directory with default exclusions and optional include/exclude regex filters; untracked files are included.
 - `outline` extracts imports, exports, functions, classes, and top-level declarations from one source file.
 
 Use the separate `sc-search` tool for bounded text or AST search with optional context windows.
@@ -172,6 +236,10 @@ Use the separate `sc-search` tool for bounded text or AST search with optional c
 
 ```json
 { "mode": "tree", "path": ".", "maxDepth": 3, "maxEntries": 200 }
+```
+
+```json
+{ "mode": "inventory", "path": ".", "include": "\\.(js|md)$", "exclude": "(^|/)node_modules/", "maxFiles": 1000, "maxDepth": 5 }
 ```
 
 `tree` always skips high-noise directories such as `.git`, `node_modules`, `.pi`, and `.opencode`, and also honors Git ignore rules best-effort via `git check-ignore` when the target is inside the current Git work tree. When `tree` hits `maxEntries`, it reports omitted entries as a lower bound in `_meta.entriesOmittedLowerBound`. The shown entries are bounded and sorted for readability, not a complete alphabetic prefix of very large directories.
@@ -199,6 +267,16 @@ Use `sc-usage` to see aggregate savings stats, local usage reports, or guidance 
 
 Opt out by setting `SIMPLE_CONTEXT_USAGE_LOG=0` or `SIMPLE_CONTEXT_DISABLE_USAGE_LOG=1` in the MCP server environment.
 
+### `sc-resolve`
+
+Resolves a path under the current project/root, accepting either Windows or POSIX separators. If the exact path is missing, it suggests close candidates under `root` up to `maxMatches`.
+
+```json
+{ "path": "src/tool/regsitry.js", "root": ".", "maxMatches": 10 }
+```
+
+Use it before repeated failed `sc-read` attempts when a path may be misspelled, moved, or separator-mangled.
+
 ### `sc-fetch`
 
 Fetches an `http` or `https` URL, strips HTML to readable text, optionally caches the result for 1 hour, and truncates large output. HTML extraction is lightweight text stripping, not browser/JavaScript rendering. Override with `maxLines` up to 500 or `maxBytes` per call.
@@ -213,7 +291,7 @@ HTTP(S) fetches are not restricted to public internet hosts. `sc-fetch` can acce
 
 ### `sc-diff`
 
-Shows a compact Git diff preview, changed-file list/status, summary, or commit history for the current project. Diff mode includes `git diff --stat` by default, then bounded diff hunks. Outside a Git work tree it returns a friendly empty response with `_meta.emptyReason: "not_git_repository"` instead of a raw Git failure.
+Shows a compact, path-scoped Git patch preview, changed-file list/status, summary, or file history for the current project. Diff mode includes `git diff --stat` by default, then bounded diff hunks. Use `sc-diff` for path-scoped patch/hunk inspection and changed-file details. Use `sc-git` for repo workflow overview, precommit checks, and decorated history across the worktree. Outside a Git work tree it returns a friendly empty response with `_meta.emptyReason: "not_git_repository"` instead of a raw Git failure.
 
 ```json
 { "path": "src/tools.js", "maxFiles": 20, "maxHunks": 20, "maxBytes": 16384 }
@@ -254,9 +332,29 @@ Show compact commit history instead of raw `git log`:
 
 In `mode: "history"`, `maxCommits` controls the commit count and `path` filters history to a file or directory. `maxFiles` is still accepted as a legacy alias for the commit count.
 
+### `sc-git`
+
+Shows read-only repository workflow views: `overview` summarizes branch/upstream and worktree state, `precommit` focuses on readiness signals, and `history` shows recent decorated commits. Prefer `sc-git` when you need a repo-wide dashboard; prefer `sc-diff` when you need path-scoped patches, hunk summaries, or changed-file detail.
+
+```json
+{ "mode": "overview", "maxFiles": 20, "maxLines": 120 }
+```
+
+```json
+{ "mode": "precommit", "maxFiles": 50, "maxBytes": 16384 }
+```
+
+### `sc-env`
+
+Shows a compact toolchain preflight: current cwd/root, platform/shell, package scripts, and tool versions. Version checks execute commands resolved from `PATH`; custom `tools` entries are bare command names (no paths/arguments) probed with built-in version args or `--version`. Command policy applies to these bare names. Keep `includePath:false` unless PATH order itself is relevant.
+
+```json
+{ "tools": ["git", "node", "npm", "rg"], "includePath": false, "maxLines": 120 }
+```
+
 ### `sc-usage`
 
-Shows aggregate savings statistics for the current project by default. Use `mode: "report"` for local usage telemetry and `mode: "guidance"` for concrete suggestions. The project key is the MCP server's `process.cwd()`.
+Shows aggregate savings statistics for the current project by default. Use `mode: "report"` for local usage telemetry and `mode: "guidance"` for concrete suggestions. The project key is the nearest project marker such as `.git`, `package.json`, `pyproject.toml`, `Cargo.toml`, or `go.mod`, with a fallback to the MCP server's `process.cwd()` when no marker is found.
 
 ```json
 {}
@@ -283,7 +381,7 @@ Each tool response reports compact savings stats in `_meta.response`: `totalByte
 
 Aggregate stats are stored globally in `~/.simple-context/stats.json`. They contain only numeric counters grouped by project path and tool name, not commands, file paths, URLs, or content.
 
-The published `tools/list` schemas preserve strict `additionalProperties: false` validation and describe high-risk semantics: `sc-run`/`sc-logs` execute local shell commands, `sc-search` uses regex patterns for text and ast-grep patterns for AST mode, `sc-search.include` is a glob while `sc-discover.include` is a regex, `sc-fetch` is HTTP(S) by default but can reach localhost/private networks, and `sc-diff` files/summary/status exclude untracked files unless staged.
+The published `tools/list` schemas preserve strict `additionalProperties: false` validation and describe high-risk semantics: `sc-run`, `sc-logs`, `sc-validate`, `sc-process`, and `sc-env` execute local commands, `sc-process` `start`/`stop` mutate managed processes while `list`/`status`/`logs` do not start/stop processes or mutate the project/source tree, `sc-env` probes `PATH` tools with version commands, `sc-search` uses regex patterns for text and ast-grep patterns for AST mode, `sc-search.include` is a glob while `sc-discover.include` is a regex, `sc-fetch` is HTTP(S) by default but can reach localhost/private networks, and `sc-diff` files/summary/status exclude untracked files unless staged.
 
 The server also injects short MCP startup instructions that tell the LLM to prefer these bounded tools for shell output, verbose diagnostic commands/logs, file previews, local search, repo discovery, readable web pages, git previews, and usage guidance. In particular, the instructions steer tests/builds/lints/typechecks/publishes/CI/logs from backend, web, Android, iOS, and infrastructure ecosystems toward `sc-logs`, reserving `sc-run` for short commands where compact stdout is the desired result. Native shell, read, fetch, or diff tools remain appropriate when complete output, exact stderr/exit behavior, interactivity, raw HTML, or unsupported behavior is specifically needed. If `_meta.truncated` is true, use `_meta.truncation.reason/retryHint` and retry with a narrower query/range/path or higher `maxLines`/`maxBytes` before falling back to native tools.
 
@@ -346,7 +444,7 @@ Add this to your project `opencode.json` or global `~/.config/opencode/opencode.
 
 Restart OpenCode after saving the config.
 
-`SIMPLE_CONTEXT_SHELL` is optional. Set it when you want `sc-run` to use the same shell style as OpenCode, for example Git for Windows `bash`. Without it, Node uses the platform default shell (`cmd.exe` on Windows).
+`SIMPLE_CONTEXT_SHELL` is optional. Set it when you want shell command execution to use the same shell style as OpenCode, for example Git for Windows `bash`. It applies to shell commands run by `sc-run`, `sc-logs`, `sc-validate` commands, and `sc-process start`. Without it, Node uses the platform default shell (`cmd.exe` on Windows).
 
 ### Pi
 
@@ -417,7 +515,7 @@ SIMPLE_CONTEXT_SHELL = "C:/Program Files/Git/bin/bash.exe"
 
 Then restart Codex Desktop, open a new chat, and check the MCP server list with `/mcp`. The server should be enabled and expose tools such as `sc_discover`, `sc_run`, `sc_read`, `sc_search`, and `sc_diff`.
 
-`SIMPLE_CONTEXT_SHELL` is optional. Keep it when you have Git for Windows and want `sc-run`/`sc-logs` to run bash-style commands; omit the env block to use the Windows default shell (`cmd.exe`). Use forward slashes in TOML paths to avoid escaping issues.
+`SIMPLE_CONTEXT_SHELL` is optional. Keep it when you have Git for Windows and want simple-context shell command execution (`sc-run`, `sc-logs`, `sc-validate` commands, and `sc-process start`) to run bash-style commands; omit the env block to use the Windows default shell (`cmd.exe`). Use forward slashes in TOML paths to avoid escaping issues.
 
 If you still want to try the npm package through `npx`, use the full `npx.cmd` path if needed:
 
@@ -438,7 +536,7 @@ If `/mcp` shows `simple-context` but a direct test reports `MCP startup failed: 
 claude mcp add simple-context -- npx -y simple-context@1.1.0
 ```
 
-If you need a specific command shell for `sc-run`, set `SIMPLE_CONTEXT_SHELL` in the environment that starts Claude Code.
+If you need a specific command shell for simple-context shell command execution (`sc-run`, `sc-logs`, `sc-validate` commands, and `sc-process start`), set `SIMPLE_CONTEXT_SHELL` in the environment that starts Claude Code.
 
 ### Local Checkout
 
@@ -477,15 +575,15 @@ Configure the server with `SIMPLE_CONTEXT_*` environment variables.
 
 | Variable | Default | Purpose |
 |---|---:|---|
-| `SIMPLE_CONTEXT_SHELL` | Node platform default | Shell used by `sc-run` |
+| `SIMPLE_CONTEXT_SHELL` | Node platform default | Shell used for shell command execution by `sc-run`, `sc-logs`, `sc-validate` commands, and `sc-process start` |
 | `SIMPLE_CONTEXT_RG_PATH` | auto-detect | Explicit path to `rg` / `rg.exe` for `sc-search` |
 | `SIMPLE_CONTEXT_AST_GREP_PATH` | auto-detect | Explicit path to `sg` / `ast-grep` for `sc-search` with `engine: "ast"` |
 | `SIMPLE_CONTEXT_MAX_RESPONSE_BYTES` | `65536` | Max formatted response bytes accepted via `maxBytes`; per-call default stays `32768` |
 | `SIMPLE_CONTEXT_MAX_COMMAND_BYTES` | `10485760` | Max command output bytes collected before stopping the process |
 | `SIMPLE_CONTEXT_MAX_FETCH_BYTES` | `10485760` | Max downloaded bytes before parsing/caching |
 | `SIMPLE_CONTEXT_FETCH_CACHE` | public-text only | Set to `0`/`false`/`off` to disable default fetch cache use; set to `all`/`private` to also cache private/loopback/link-local hosts by default, including DNS names that resolve to private addresses. Per-call `cache` overrides this. Public/private classification is a best-effort cache convenience, not a security boundary. |
-| `SIMPLE_CONTEXT_DISABLE_COMMAND_TOOLS` | unset | Set to `1` to disable command-executing tools (`sc-run` and `sc-logs`). `SIMPLE_CONTEXT_DISABLE_RUN=1` is also accepted as an alias. |
-| `SIMPLE_CONTEXT_COMMAND_ALLOWLIST` | unset | Comma/semicolon/newline-delimited exact shell command allowlist for `sc-run`/`sc-logs`, e.g. `npm test,npm run check`. This is string matching before shell execution, not a sandbox. |
+| `SIMPLE_CONTEXT_DISABLE_COMMAND_TOOLS` | unset | Set to `1` to disable command-executing tools (`sc-run`, `sc-logs`, `sc-validate`, `sc-process`, `sc-env`). `SIMPLE_CONTEXT_DISABLE_RUN=1` is also accepted as an alias. |
+| `SIMPLE_CONTEXT_COMMAND_ALLOWLIST` | unset | Comma/semicolon/newline-delimited exact allowlist for command-executing tools. `sc-run`/`sc-logs`/`sc-validate`/`sc-process` match shell command strings; `sc-env` matches bare tool names (for example `node`). This is string matching before execution, not a sandbox. |
 | `SIMPLE_CONTEXT_FETCH_PUBLIC_ONLY` | unset | Set to `1` to block `sc-fetch` requests to localhost/private/special-use/unresolved hosts, including redirects checked hop-by-hop. This is best-effort only: DNS rebinding/lookup-vs-connect races and incomplete IPv6/RFC6890 coverage are not guaranteed to be blocked. Use external sandboxing/network policy for enforcement. |
 | `SIMPLE_CONTEXT_PATH_ROOTS` | unset | Comma/semicolon/newline-delimited filesystem roots allowed for local path tools (`sc-read`, `sc-search`, `sc-discover`, `sc-diff` path arguments). |
 | `SIMPLE_CONTEXT_MAX_READ_BYTES` | `10485760` | Max file bytes read before previewing |

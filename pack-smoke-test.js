@@ -109,6 +109,7 @@ try {
     "package.json",
     "server.js",
     "src/tools/registry.js",
+    "src/tools/process.js",
     "src/package-scripts.js",
     "README.md",
     "CHANGELOG.md",
@@ -158,15 +159,22 @@ try {
     const toolsList = responses.find((response) => response.id === 2);
 
     assert.equal(initialize.result.serverInfo.name, "simple-context");
-    assert.equal(toolsList.result.tools.length, 8);
+    assert.equal(toolsList.result.tools.length, 15);
     assert.deepEqual(toolsList.result.tools.map((tool) => tool.name), [
       "sc-run",
       "sc-logs",
+      "sc-validate",
+      "sc-process",
       "sc-read",
+      "sc-snippets",
       "sc-search",
+      "sc-search-plan",
       "sc-discover",
+      "sc-resolve",
       "sc-fetch",
       "sc-diff",
+      "sc-git",
+      "sc-env",
       "sc-usage",
     ]);
   } finally {

@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { projectKey, usageLogEnabled, USAGE_LOG_FILE, USAGE_LOG_MAX_BYTES } from "./constants.js";
+import { projectKey, projectKeyForPath, usageLogEnabled, USAGE_LOG_FILE, USAGE_LOG_MAX_BYTES } from "./constants.js";
 import { chmodPrivateFile, ensurePrivateDir, PRIVATE_FILE_MODE, withFileLock } from "./storage.js";
 
 const MAX_REPORT_EVENTS = 10_000;
@@ -72,11 +72,21 @@ function completeJsonLines(text) {
   return complete.slice(firstNewline + 1);
 }
 
-export async function usageReport({ maxEvents = 1000 } = {}) {
+export async function usageReport({ maxEvents = 1000, project: requestedProject } = {}) {
   await usageWrite.catch(() => {});
   const eventLimit = normalizeEventLimit(maxEvents);
   const entries = await readUsageEntries(eventLimit);
-  const project = projectKey();
+  const currentProject = projectKey();
+  const project = normalizeRequestedProject(requestedProject, currentProject);
+
+  if (project === "all") {
+    const report = summarizeUsage(entries, "all projects", entries.length, entries.length, { allProjects: true });
+    return {
+      text: formatUsageReport(report),
+      meta: report,
+    };
+  }
+
   if (!project) {
     const report = summarizeUsage([], process.cwd(), entries.length, 0);
     report.ignoredProject = true;
@@ -85,13 +95,31 @@ export async function usageReport({ maxEvents = 1000 } = {}) {
       meta: report,
     };
   }
+
   const projectEntries = entries.filter((entry) => entry.project === project);
-  const report = summarizeUsage(projectEntries, project, entries.length, projectEntries.length);
+  const report = summarizeUsage(projectEntries, project, entries.length, projectEntries.length, { requestedProject: requestedProject ?? "current" });
 
   return {
     text: formatUsageReport(report),
     meta: report,
   };
+}
+
+function normalizeRequestedProject(requestedProject, currentProject) {
+  if (requestedProject === undefined || requestedProject === null || requestedProject === "") return currentProject;
+  if (requestedProject === "all") return "all";
+
+  const value = String(requestedProject);
+  const resolved = path.resolve(value);
+  if (fs.existsSync(resolved) || isPathLikeProjectFilter(value)) return projectKeyForPath(resolved);
+  return value;
+}
+
+function isPathLikeProjectFilter(value) {
+  return path.isAbsolute(value)
+    || value.startsWith(".")
+    || value.includes("/")
+    || value.includes("\\");
 }
 
 function normalizeEventLimit(value) {
@@ -138,21 +166,28 @@ function parseUsageLine(line) {
   }
 }
 
-function summarizeUsage(entries, project, eventsRead, projectEventsRead) {
+function summarizeUsage(entries, project, eventsRead, projectEventsRead, options = {}) {
   const byTool = new Map();
   const byCommandKind = new Map();
+  const byProject = new Map();
+  const byFailure = new Map();
   let truncatedCalls = 0;
   let failedCalls = 0;
 
   for (const entry of entries) {
     if (entry.truncated) truncatedCalls++;
-    if (entry.ok === false) failedCalls++;
+    if (entry.ok === false) {
+      failedCalls++;
+      addFailureSummary(byFailure, entry);
+    }
     addSummary(byTool, entry.tool, entry);
     if (entry.commandKind) addSummary(byCommandKind, entry.commandKind, entry);
+    if (entry.project) addSummary(byProject, entry.project, entry);
   }
 
   const toolSummaries = sortedSummaries(byTool);
   const commandSummaries = sortedSummaries(byCommandKind);
+  const failureSummaries = sortedFailureSummaries(byFailure);
 
   return {
     project,
@@ -163,9 +198,15 @@ function summarizeUsage(entries, project, eventsRead, projectEventsRead) {
     eventsAnalyzed: entries.length,
     truncatedCalls,
     failedCalls,
+    allProjects: Boolean(options.allProjects),
+    requestedProject: options.requestedProject,
+    projectOverview: sortedSummaries(byProject),
+    topReturnedByteCalls: topReturnedByteCalls(entries),
+    topTruncationContributors: [...toolSummaries].sort((a, b) => b.truncated - a.truncated || b.returnedBytes - a.returnedBytes).filter((summary) => summary.truncated > 0).slice(0, 10),
+    failureSummaries,
     byTool: toolSummaries,
     byCommandKind: commandSummaries,
-    recommendations: recommendTools(commandSummaries, toolSummaries),
+    recommendations: recommendTools(commandSummaries, toolSummaries, failureSummaries),
   };
 }
 
@@ -192,7 +233,40 @@ function sortedSummaries(map) {
     .sort((a, b) => b.truncated - a.truncated || b.calls - a.calls || b.savedBytes - a.savedBytes);
 }
 
-function recommendTools(commandSummaries, toolSummaries) {
+function addFailureSummary(map, entry) {
+  const tool = entry.tool ?? "unknown";
+  const exitCode = entry.exitCode ?? "none";
+  const errorCode = entry.errorCode ?? "none";
+  const key = `${tool}\t${exitCode}\t${errorCode}`;
+  const summary = map.get(key) ?? { tool, exitCode, errorCode, calls: 0, returnedBytes: 0, commandKind: entry.commandKind };
+  summary.calls++;
+  summary.returnedBytes += numberOrZero(entry.returnedBytes);
+  if (!summary.commandKind && entry.commandKind) summary.commandKind = entry.commandKind;
+  map.set(key, summary);
+}
+
+function sortedFailureSummaries(map) {
+  return [...map.values()].sort((a, b) => b.calls - a.calls || b.returnedBytes - a.returnedBytes);
+}
+
+function topReturnedByteCalls(entries) {
+  return [...entries]
+    .filter((entry) => numberOrZero(entry.returnedBytes) > 0)
+    .sort((a, b) => numberOrZero(b.returnedBytes) - numberOrZero(a.returnedBytes))
+    .slice(0, 10)
+    .map((entry) => ({
+      tool: entry.tool,
+      project: entry.project,
+      returnedBytes: numberOrZero(entry.returnedBytes),
+      totalBytes: numberOrZero(entry.totalBytes),
+      truncated: Boolean(entry.truncated),
+      exitCode: entry.exitCode,
+      errorCode: entry.errorCode,
+      commandKind: entry.commandKind,
+    }));
+}
+
+function recommendTools(commandSummaries, toolSummaries, failureSummaries = []) {
   const recommendations = [];
   const commandMap = new Map(commandSummaries.map((summary) => [summary.name, summary]));
   const toolMap = new Map(toolSummaries.map((summary) => [summary.name, summary]));
@@ -208,6 +282,17 @@ function recommendTools(commandSummaries, toolSummaries) {
   const searchTool = toolMap.get("search");
   if (search && (!searchTool || search.calls > searchTool.calls)) {
     addRecommendation(recommendations, search, "sc-search", "Use bounded search results with contextLines when surrounding lines are useful.");
+  }
+
+  const searchRegexFailures = failureSummaries.find((summary) => (summary.tool === "search" || summary.tool === "sc-search" || summary.commandKind === "search-discovery") && summary.exitCode === 2);
+  if (searchRegexFailures) {
+    recommendations.push({
+      toolName: "sc-search literal:true",
+      reason: "Search exitCode 2 often means a regex parse error; use literal:true for plain strings or validate regex syntax.",
+      evidence: `${searchRegexFailures.calls} search failures with exitCode 2`,
+      calls: searchRegexFailures.calls,
+      truncated: 0,
+    });
   }
 
   return recommendations;
@@ -232,6 +317,7 @@ function formatUsageReport(report) {
       `Log file: ${report.logFile}`,
     ];
     if (report.ignoredProject) lines.push("Current working directory is a markerless temp directory; usage is ignored.");
+    else if (report.eventsRead > 0) lines.push("No usage events found for this project in the current window. Try increasing maxEvents or use project:\"all\" to inspect all logged projects.");
     else lines.push("No usage events found yet.");
     return lines.join("\n");
   }
@@ -239,10 +325,17 @@ function formatUsageReport(report) {
   const lines = [
     `Usage summary for ${report.project}`,
     `Log file: ${report.logFile}`,
-    `Events analyzed: ${report.eventsAnalyzed} (${report.projectEventsRead} for this project, ${report.eventsRead} read)`,
+    report.allProjects
+      ? `Events analyzed: ${report.eventsAnalyzed} (${report.projectEventsRead} across all projects, ${report.eventsRead} read)`
+      : `Events analyzed: ${report.eventsAnalyzed} (${report.projectEventsRead} for this project, ${report.eventsRead} read)`,
     `Truncated calls: ${report.truncatedCalls}`,
     `Failed calls: ${report.failedCalls}`,
   ];
+
+  if (report.allProjects && report.projectOverview.length > 0) {
+    lines.push("", "Project overview:");
+    for (const summary of report.projectOverview.slice(0, 10)) lines.push(formatSummaryLine(summary));
+  }
 
   lines.push("", "By tool:");
   for (const summary of report.byTool.slice(0, 10)) lines.push(formatToolSummaryLine(summary));
@@ -250,6 +343,21 @@ function formatUsageReport(report) {
   if (report.byCommandKind.length > 0) {
     lines.push("", "Command kinds:");
     for (const summary of report.byCommandKind.slice(0, 10)) lines.push(formatSummaryLine(summary));
+  }
+
+  if (report.topReturnedByteCalls.length > 0) {
+    lines.push("", "Top returned-byte calls:");
+    for (const call of report.topReturnedByteCalls.slice(0, 5)) lines.push(`${displayToolName(call.tool)}${call.commandKind ? `/${call.commandKind}` : ""}: ${formatBytes(call.returnedBytes)} returned${call.truncated ? ", truncated" : ""}${call.exitCode !== undefined ? `, exitCode ${call.exitCode}` : ""}`);
+  }
+
+  if (report.topTruncationContributors.length > 0) {
+    lines.push("", "Top truncation contributors:");
+    for (const summary of report.topTruncationContributors.slice(0, 5)) lines.push(`${displayToolName(summary.name)}: ${summary.truncated} truncated, ${formatBytes(summary.returnedBytes)} returned`);
+  }
+
+  if (report.failureSummaries.length > 0) {
+    lines.push("", "Failures by tool/exitCode/errorCode:");
+    for (const failure of report.failureSummaries.slice(0, 10)) lines.push(`${displayToolName(failure.tool)} exitCode=${failure.exitCode} errorCode=${failure.errorCode}: ${failure.calls} failed`);
   }
 
   if (report.recommendations.length > 0) {

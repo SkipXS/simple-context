@@ -355,7 +355,7 @@ try {
   ]);
   assert.equal(Array.isArray(batch), true);
   assert.equal(batch.length, 3);
-  assert.equal(batch.find((response) => response.id === "list").result.tools.length, 8);
+  assert.equal(batch.find((response) => response.id === "list").result.tools.length, 15);
   assert.equal(batch.find((response) => response.id === null).error.code, -32600);
   assert.equal(batch.find((response) => response.id === "missing").error.code, -32601);
 
@@ -372,11 +372,18 @@ try {
   assert.deepEqual(listed.result.tools.map((tool) => tool.name), [
     "sc-run",
     "sc-logs",
+    "sc-validate",
+    "sc-process",
     "sc-read",
+    "sc-snippets",
     "sc-search",
+    "sc-search-plan",
     "sc-discover",
+    "sc-resolve",
     "sc-fetch",
     "sc-diff",
+    "sc-git",
+    "sc-env",
     "sc-usage",
   ]);
   assert.equal(listed.result.tools.every((tool) => tool.inputSchema.additionalProperties === false), true);
@@ -388,13 +395,28 @@ try {
   assert.deepEqual(searchSchema.properties.engine.enum, ["text", "ast"]);
   assert.equal(searchSchema.properties.maxLines.maximum, 500);
   assert.match(searchSchema.properties.include.description, /glob, not regex/);
+  const searchPlanSchema = listed.result.tools.find((tool) => tool.name === "sc-search-plan").inputSchema;
+  assert.deepEqual(searchPlanSchema.required, ["pattern"]);
+  assert.equal(searchPlanSchema.properties.engine, undefined);
+  assert.equal(searchPlanSchema.properties.filesOnly, undefined);
   const discoverSchema = listed.result.tools.find((tool) => tool.name === "sc-discover").inputSchema;
-  assert.deepEqual(discoverSchema.properties.mode.enum, ["summary", "files", "tree", "outline"]);
+  assert.deepEqual(discoverSchema.properties.mode.enum, ["summary", "files", "tree", "outline", "inventory"]);
+  assert.equal(discoverSchema.properties.exclude.type, "string");
   const fetchToolInfo = listed.result.tools.find((tool) => tool.name === "sc-fetch");
   assert.match(fetchToolInfo.description, /no JS rendering/);
   const diffSchema = listed.result.tools.find((tool) => tool.name === "sc-diff").inputSchema;
   assert.deepEqual(diffSchema.properties.mode.enum, ["diff", "status", "history", "files", "summary"]);
   assert.equal(diffSchema.properties.maxLines.maximum, 500);
+  const validateSchema = listed.result.tools.find((tool) => tool.name === "sc-validate").inputSchema;
+  assert.deepEqual(validateSchema.properties.mode.enum, ["auto", "npm", "go", "python", "ruby", "custom"]);
+  assert.equal(validateSchema.properties.command.type, "string");
+  const processSchema = listed.result.tools.find((tool) => tool.name === "sc-process").inputSchema;
+  assert.deepEqual(processSchema.properties.mode.enum, ["start", "list", "status", "logs", "stop"]);
+  assert.equal(processSchema.properties.command.type, "string");
+  assert.equal(processSchema.properties.id.type, "string");
+  const envSchema = listed.result.tools.find((tool) => tool.name === "sc-env").inputSchema;
+  assert.equal(envSchema.properties.tools.type, "array");
+  assert.equal(envSchema.properties.includePath.type, "boolean");
   const usageSchema = listed.result.tools.find((tool) => tool.name === "sc-usage").inputSchema;
   assert.deepEqual(usageSchema.properties.mode.enum, ["stats", "report", "guidance"]);
   const readSchema = listed.result.tools.find((tool) => tool.name === "sc-read").inputSchema;
@@ -403,6 +425,10 @@ try {
   assert.match(readSchema.properties.path.description, /Primary file/);
   assert.match(readSchema.properties.paths.description, /Standalone list or extra files/);
   assert.match(readSchema.properties.paths.description, /Ranges apply only/);
+  const snippetsSchema = listed.result.tools.find((tool) => tool.name === "sc-snippets").inputSchema;
+  assert.equal(snippetsSchema.properties.spec.type, "string");
+  assert.equal(snippetsSchema.properties.path, undefined);
+  assert.equal(snippetsSchema.properties.paths, undefined);
 
   const slowCommand = nodeEvalCommand("setTimeout(() => {}, 500)");
   const limitedStart = Date.now();
@@ -444,6 +470,15 @@ try {
   assert.ok(files.result, JSON.stringify(files));
   assert.match(files.result.content[0].text, /server\.js/);
   assert.equal(typeof files.result._meta.totalFiles, "number");
+
+  const inventory = await request("tools/call", {
+    name: "sc-discover",
+    arguments: { mode: "inventory", include: "^(src|test)/.*\\.js$", exclude: "process", maxDepth: 3, maxFiles: 20 },
+  });
+  assert.ok(inventory.result, JSON.stringify(inventory));
+  assert.equal(inventory.result._meta.mode, "inventory");
+  assert.match(inventory.result.content[0].text, /Top-level directories:/);
+  assert.doesNotMatch(inventory.result.content[0].text, /node_modules/);
 
   const fallbackFilesDir = join(tempDir, "fallback-files");
   await mkdir(join(fallbackFilesDir, "sub"), { recursive: true });
@@ -932,7 +967,7 @@ try {
     arguments: {},
   });
   assert.equal(missingReadPath.error.code, -32602);
-  assert.match(missingReadPath.error.message, /requires path, paths, or ranges/);
+  assert.match(missingReadPath.error.message, /requires path, paths, ranges, or spec/);
 
   const readMany = await request("tools/call", {
     name: "sc-read",
@@ -1120,6 +1155,21 @@ try {
   });
   assert.equal(largerRangeRead.result._meta.truncated, false);
   assert.equal(largerRangeRead.result._meta.returnedLines, 300);
+
+  const snippetsSpecRead = await request("tools/call", {
+    name: "sc-snippets",
+    arguments: { spec: `${largeFile}:291-292`, maxLinesPerFile: 20, maxTotalBytes: 4096 },
+  });
+  assert.ok(snippetsSpecRead.result, JSON.stringify(snippetsSpecRead));
+  assert.equal(snippetsSpecRead.result._meta.rangesRequested, 1);
+  assert.match(snippetsSpecRead.result.content[0].text, /292: file line 291/);
+
+  const snippetsRejectsPath = await request("tools/call", {
+    name: "sc-snippets",
+    arguments: { path: largeFile, fromLine: 1, toLine: 2 },
+  });
+  assert.equal(snippetsRejectsPath.error.code, -32602);
+  assert.match(snippetsRejectsPath.error.message, /Unknown argument for sc-snippets: path/);
 
   const lineFormattedRead = await request("tools/call", {
     name: "sc-read",
@@ -1815,7 +1865,8 @@ console.log(JSON.stringify(match(8, 4, 'target()', 'target();')));
   });
   assert.equal(usageProjectScopeRun.code, 0, usageProjectScopeRun.stderr);
   const usageProjectScopePayload = JSON.parse(usageProjectScopeRun.stdout.trim());
-  assert.match(usageProjectScopePayload.text, /No usage events found yet/);
+  assert.match(usageProjectScopePayload.text, /No usage events found for this project/);
+  assert.match(usageProjectScopePayload.text, /project:"all"/);
   assert.doesNotMatch(usageProjectScopePayload.text, /git-history/);
   assert.equal(usageProjectScopePayload.meta.eventsRead, 1);
   assert.equal(usageProjectScopePayload.meta.projectEventsRead, 0);

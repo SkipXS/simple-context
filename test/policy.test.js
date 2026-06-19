@@ -14,20 +14,33 @@ await describe("strict environment policies", async () => {
   await it("can disable command-executing tools", async () => {
     const output = await execNode(`
       const { callTool } = await import("./src/tools.js");
+      const cases = [
+        ["sc-run", { command: "node --version" }],
+        ["sc-logs", { command: "node --version" }],
+        ["sc-validate", { mode: "custom", command: "node --version" }],
+        ["sc-process start", "sc-process", { mode: "start", command: "node --version" }],
+        ["sc-process list", "sc-process", { mode: "list" }],
+        ["sc-process status", "sc-process", { mode: "status", id: "seeded" }],
+        ["sc-process logs", "sc-process", { mode: "logs", id: "seeded" }],
+        ["sc-process stop", "sc-process", { mode: "stop", id: "seeded" }],
+        ["sc-env", { tools: ["node"] }],
+      ];
+      const normalizedCases = cases.map((entry) => entry.length === 2 ? [entry[0], entry[0], entry[1]] : entry);
       const results = [];
-      for (const name of ["sc-run", "sc-logs"]) {
+      for (const [label, toolName, args] of normalizedCases) {
         try {
-          await callTool(name, { command: "node --version" });
-          results.push({ name, ok: true });
+          await callTool(toolName, args);
+          results.push({ name: label, ok: true });
         } catch (error) {
-          results.push({ name, ok: false, code: error.code, message: error.message });
+          results.push({ name: label, ok: false, code: error.code, message: error.message });
         }
       }
       process.stdout.write(JSON.stringify(results));
     `, { SIMPLE_CONTEXT_DISABLE_COMMAND_TOOLS: "1" });
 
     const results = JSON.parse(output);
-    assert.deepEqual(results.map((entry) => entry.ok), [false, false]);
+    assert.deepEqual(results.map((entry) => entry.name), ["sc-run", "sc-logs", "sc-validate", "sc-process start", "sc-process list", "sc-process status", "sc-process logs", "sc-process stop", "sc-env"]);
+    assert.ok(results.every((entry) => entry.ok === false));
     assert.ok(results.every((entry) => entry.code === -32602));
     assert.ok(results.every((entry) => /disabled/.test(entry.message)));
   });
@@ -55,6 +68,55 @@ await describe("strict environment policies", async () => {
     assert.equal(result.blocked.ok, false);
     assert.equal(result.blocked.code, -32602);
     assert.match(result.blocked.message, /COMMAND_ALLOWLIST/);
+  });
+
+  await it("does not apply command allowlist exact-match checks to process non-start modes", async () => {
+    const testHome = await fs.mkdtemp(path.join(os.tmpdir(), "scl-policy-process-home-"));
+    const registryDir = path.join(testHome, ".simple-context", "processes");
+    const logDir = path.join(registryDir, "logs");
+    const id = "seeded-non-start";
+    const logPath = path.join(logDir, `${id}.log`);
+    await fs.mkdir(logDir, { recursive: true });
+    await fs.writeFile(logPath, "seeded log line\n", "utf8");
+    await fs.writeFile(path.join(registryDir, "registry.json"), JSON.stringify({
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      processes: [{
+        id,
+        name: "seeded",
+        command: "unlisted seeded command",
+        pid: 999999,
+        cwd: process.cwd(),
+        logPath,
+        startedAt: new Date().toISOString(),
+        status: "running",
+      }],
+    }), "utf8");
+    const toolsUrl = pathToFileURL(path.join(process.cwd(), "src", "tools.js")).href;
+
+    const output = await execNode(`
+      const { callTool } = await import(${JSON.stringify(toolsUrl)});
+      const listed = await callTool("sc-process", { mode: "list" });
+      const status = await callTool("sc-process", { mode: "status", id: ${JSON.stringify(id)} });
+      const logs = await callTool("sc-process", { mode: "logs", id: ${JSON.stringify(id)} });
+      const stopped = await callTool("sc-process", { mode: "stop", id: ${JSON.stringify(id)} });
+      process.stdout.write(JSON.stringify({
+        listed: listed.content[0].text,
+        status: status.content[0].text,
+        logs: logs.content[0].text,
+        stopped: stopped.content[0].text,
+      }));
+    `, {
+      HOME: testHome,
+      USERPROFILE: testHome,
+      SIMPLE_CONTEXT_COMMAND_ALLOWLIST: "echo allowed",
+    });
+
+    const result = JSON.parse(output);
+    assert.match(result.listed, new RegExp(id));
+    assert.match(result.status, /command: unlisted seeded command/);
+    assert.match(result.logs, /seeded log line/);
+    assert.match(result.stopped, /already exited/);
   });
 
   await it("does not treat allowlist entries as shell prefixes", async () => {

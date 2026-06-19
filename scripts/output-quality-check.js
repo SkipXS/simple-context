@@ -4,14 +4,14 @@ process.env.SIMPLE_CONTEXT_USAGE_LOG = "0";
 process.env.SIMPLE_CONTEXT_STATS = "0";
 
 const assert = await import("node:assert/strict");
-const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
+const { mkdtemp, readFile, rm, writeFile } = await import("node:fs/promises");
 const { join } = await import("node:path");
 const { tmpdir } = await import("node:os");
 
 const { tools, callTool } = await import("../src/tools.js");
 const { formatOutput } = await import("../src/output.js");
 
-const MAX_TOOLS_LIST_BYTES = 9_000;
+const MAX_TOOLS_LIST_BYTES = 16_000;
 const MAX_TOOL_DESCRIPTION_CHARS = 140;
 const MAX_PROPERTY_DESCRIPTION_CHARS = 100;
 const BANNED_SCHEMA_KEYWORDS = ["anyOf", "oneOf", "allOf", "const", "not"];
@@ -36,7 +36,7 @@ function schemaKeywordPath(value, banned, path = "inputSchema") {
 function assertCompactSchemas() {
   const toolsListBytes = Buffer.byteLength(JSON.stringify(tools), "utf8");
   assert.ok(toolsListBytes <= MAX_TOOLS_LIST_BYTES, `tools/list too large: ${toolsListBytes} > ${MAX_TOOLS_LIST_BYTES}`);
-  assert.equal(tools.tools.length, 8);
+  assert.equal(tools.tools.length, 15);
   assert.equal(schemaKeywordPath(tools.tools.map((tool) => tool.inputSchema), BANNED_SCHEMA_KEYWORDS), undefined);
 
   for (const tool of tools.tools) {
@@ -65,17 +65,74 @@ function assertSchemaWording() {
   assert.match(read.inputSchema.properties.paths.description, /Standalone list or extra files/);
   assert.match(read.inputSchema.properties.paths.description, /Ranges apply only/);
 
+  const snippets = findTool("sc-snippets");
+  assert.equal(snippets.inputSchema.properties.spec.type, "string");
+  assert.equal(snippets.inputSchema.properties.path, undefined);
+  assert.equal(snippets.inputSchema.properties.paths, undefined);
+  assert.equal(snippets.inputSchema.properties.ranges.items.minProperties, 2);
+  assert.match(snippets.inputSchema.properties.ranges.description, /fromLine or toLine/);
+  assert.match(snippets.description, /line-range snippets/);
+
   const search = findTool("sc-search");
   assert.match(search.inputSchema.properties.pattern.description, /Regex for text/);
   assert.match(search.inputSchema.properties.include.description, /glob, not regex/);
+  const searchPlan = findTool("sc-search-plan");
+  assert.equal(searchPlan.inputSchema.properties.engine, undefined);
+  assert.equal(searchPlan.inputSchema.properties.filesOnly, undefined);
+  assert.match(searchPlan.description, /text search/);
 
   const discover = findTool("sc-discover");
+  assert.match(discover.description, /filesystem inventory/);
   assert.match(discover.inputSchema.properties.include.description, /Regex filter/);
 
   assert.match(findTool("sc-run").description, /shell command/i);
   assert.match(findTool("sc-logs").description, /stdout\+stderr/);
+  assert.match(findTool("sc-validate").description, /explicit command only with mode: custom/);
+  assert.deepEqual(findTool("sc-validate").inputSchema.properties.mode.enum, ["auto", "npm", "go", "python", "ruby", "custom"]);
+  assert.match(findTool("sc-validate").inputSchema.properties.command.description, /only when mode is custom/);
+  assert.match(findTool("sc-process").description, /start\/stop change/);
+  assert.match(findTool("sc-process").description, /list\/status\/logs inspect without project writes/);
+  assert.match(findTool("sc-env").description, /execute PATH version commands/);
+  assert.match(findTool("sc-env").inputSchema.properties.tools.description, /Bare command names/);
+  assert.deepEqual(findTool("sc-process").inputSchema.properties.mode.enum, ["start", "list", "status", "logs", "stop"]);
   assert.match(findTool("sc-fetch").description, /Lightweight HTML stripping; no JS rendering/);
-  assert.match(findTool("sc-diff").description, /Untracked files are excluded/);
+  assert.match(findTool("sc-diff").description, /path-scoped git diffs/);
+  assert.match(findTool("sc-git").description, /workflow dashboard/);
+}
+
+async function assertReadmeWording() {
+  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  assert.doesNotMatch(readme, /Eight tools/);
+  assert.match(readme, /Fifteen tools/);
+
+  const documentedToolNames = new Set(
+    readme
+      .split("\n")
+      .filter((line) => line.startsWith("| `sc-"))
+      .map((line) => line.match(/^\| `(sc-[^`]+)` \|/)?.[1])
+      .filter(Boolean),
+  );
+  const registeredToolNames = tools.tools.map((tool) => tool.name).sort();
+  assert.deepEqual([...documentedToolNames].sort(), registeredToolNames, "README tool table must mention every registered sc-* tool exactly");
+
+  for (const toolName of registeredToolNames) {
+    assert.ok(readme.includes(`### \`${toolName}\``), `README missing section for ${toolName}`);
+  }
+
+  assert.match(readme, /Use `sc-diff` for path-scoped patch\/hunk inspection/);
+  assert.match(readme, /Use `sc-git` for repo workflow overview/);
+  assert.match(readme, /`start` and `stop` have managed-process side effects/);
+  assert.match(readme, /`list`, `status`, and `logs` do not start or stop managed processes/);
+  assert.match(readme, /metadata housekeeping may update private files/);
+  assert.match(readme, /`spec` string \(`file:start-end,file2:start-end`\)/);
+  assert.match(readme, /each `ranges\[\]` entry must include `fromLine` or `toLine`/);
+  assert.match(readme, /It is text-only: no `engine`, `language`, `filesOnly`, or `mode` arguments/);
+  assert.match(readme, /`inventory` summarizes filesystem files under `path`/);
+  assert.match(readme, /untracked files are included/);
+  assert.doesNotMatch(readme, /`inventory` summarizes tracked files/);
+  assert.match(readme, /Command-executing tools \(`sc-run`, `sc-logs`, `sc-validate`, `sc-process`, and `sc-env`\)/);
+  assert.match(readme, /`sc-env` probes requested tools by executing version commands found on `PATH`/);
+  assert.match(readme, /`sc-env` matches bare tool names/);
 }
 
 function assertFormatterGoldens() {
@@ -191,6 +248,18 @@ async function assertToolOutputGoldens() {
     assert.equal(rangedRead._meta.fromLine, 2);
     assert.equal(rangedRead._meta.toLine, 3);
 
+    const snippetsRead = await callTool("sc-snippets", {
+      spec: `${samplePath}:2-3`,
+      maxLinesPerFile: 20,
+      maxTotalBytes: 4096,
+    });
+    assert.equal(normalizePath(snippetsRead.content[0].text, samplePath, "<tmp>/sample.txt"), [
+      "--- <tmp>/sample.txt:2-3 ---",
+      "2: beta",
+      "3: gamma",
+    ].join("\n"));
+    assert.equal(snippetsRead._meta.rangesRequested, 1);
+
     const longAPath = join(tempDir, "long-a.txt");
     const longBPath = join(tempDir, "long-b.txt");
     await writeFile(longAPath, Array.from({ length: 12 }, (_, index) => `a-${index + 1}`).join("\n"), "utf8");
@@ -217,6 +286,7 @@ async function assertToolOutputGoldens() {
 
 assertCompactSchemas();
 assertSchemaWording();
+await assertReadmeWording();
 assertFormatterGoldens();
 await assertToolOutputGoldens();
 

@@ -1,12 +1,17 @@
 import { DEFAULT_BYTES, DEFAULT_COMMAND_TIMEOUT_MS, MAX_BYTES, MAX_COMMAND_TIMEOUT_MS, MAX_LINES, MIN_COMMAND_TIMEOUT_MS } from "../constants.js";
 import { discoverTool } from "./discover.js";
 import { diffTool } from "./diff.js";
+import { envTool } from "./env.js";
 import { fetchTool } from "./fetch.js";
+import { gitTool } from "./git.js";
 import { logsTool } from "./logs.js";
-import { readTool } from "./read.js";
+import { processTool } from "./process.js";
+import { readSnippetsTool, readTool } from "./read.js";
+import { resolveTool } from "./resolve.js";
 import { runTool } from "./run.js";
 import { searchTool } from "./search.js";
 import { usageTool } from "./usage.js";
+import { validateTool } from "./validate.js";
 import { recordUsage } from "../usage.js";
 
 const TOOL_PREFIX = "sc-";
@@ -63,7 +68,7 @@ export const tools = {
     {
       name: "logs",
       description:
-        "Run verbose diagnostic commands (tests/builds/lints/web/mobile/CI/logs) and show bounded error/warning blocks from stdout+stderr.",
+        "Run diagnostic commands and show bounded error/warning blocks from stdout+stderr.",
       inputSchema: {
         type: "object",
         properties: {
@@ -88,19 +93,53 @@ export const tools = {
       },
     },
     {
+      name: "validate",
+      description:
+        "Auto-detect and run one safe project validation command, or run an explicit command only with mode: custom, with compact diagnostics.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          mode: { type: "string", enum: ["auto", "npm", "go", "python", "ruby", "custom"], description: "Validation mode. Default: auto." },
+          command: { type: "string", description: "Safe explicit command. Accepted only when mode is custom; required for custom mode." },
+          maxLines: maxLinesProperty("Content line cap.", 120),
+          maxBytes: maxBytesProperty(),
+          timeoutMs: timeoutMsProperty(),
+        },
+      },
+    },
+    {
+      name: "process",
+      description:
+        "Manage dev servers: start/stop change managed processes; list/status/logs inspect without project writes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          mode: { type: "string", enum: ["start", "list", "status", "logs", "stop"], description: "Mode. Default: list." },
+          command: { type: "string", description: "Shell command to start; required for start." },
+          id: { type: "string", description: "Managed process id for status/logs/stop." },
+          name: { type: "string", description: "Optional friendly process name." },
+          cwd: { type: "string", description: "Working directory for start. Default: cwd." },
+          timeoutMs: integerProperty({ minimum: MIN_COMMAND_TIMEOUT_MS, maximum: MAX_COMMAND_TIMEOUT_MS, defaultValue: 1000, description: "Readiness/log wait timeout ms." }),
+          maxLines: maxLinesProperty("Content line cap.", 120),
+          maxBytes: maxBytesProperty(),
+        },
+      },
+    },
+    {
       name: "read",
       description:
-        "Read bounded UTF-8 file previews. Use path/fromLine/toLine for one ranged file or ranges for snippet packs.",
+        "Read bounded UTF-8 file previews. Use path/fromLine/toLine, ranges, or compact spec for snippet packs.",
       inputSchema: {
         type: "object",
         properties: {
           path: { type: "string", description: "Primary file path; ranged when fromLine/toLine set." },
+          spec: { type: "string", description: "Compact range pack, e.g. file:1-80,file2:20-60. Exclusive with path/paths/ranges." },
           paths: {
             type: "array",
             minItems: 1,
             maxItems: 20,
             items: { type: "string" },
-            description: "Standalone list or extra files, max 20. Ranges apply only to path/one file.",
+            description: "Standalone list or extra files, max 20. Ranges apply only to path.",
           },
           ranges: {
             type: "array",
@@ -110,26 +149,26 @@ export const tools = {
               type: "object",
               properties: {
                 path: { type: "string", description: "Snippet file path." },
-                fromLine: { type: "integer", minimum: 1, description: "First 1-based line for this snippet." },
-                toLine: { type: "integer", minimum: 1, description: "Last 1-based line for this snippet." },
+                fromLine: { type: "integer", minimum: 1, description: "First 1-based line." },
+                toLine: { type: "integer", minimum: 1, description: "Last 1-based line." },
               },
               required: ["path"],
               additionalProperties: false,
             },
-            description: "Snippet-pack ranges, max 20: { path, fromLine?, toLine? }.",
+            description: "Snippet ranges, max 20: { path, fromLine?, toLine? }.",
           },
           maxLines: maxLinesProperty("Content line cap; per-file in paths/ranges mode."),
-          lineNumbers: { type: "boolean", description: "Number preview lines. path/paths default false; ranges default true unless set false." },
+          lineNumbers: { type: "boolean", description: "Number lines. path/paths default false; ranges default true unless set false." },
           maxBytes: maxBytesProperty("Byte cap; per-file in paths/ranges mode."),
           fromLine: {
             type: "integer",
             minimum: 1,
-            description: "First 1-based line for ranged read.",
+            description: "First 1-based line.",
           },
           toLine: {
             type: "integer",
             minimum: 1,
-            description: "Last 1-based line for ranged read.",
+            description: "Last 1-based line.",
           },
           maxLinesPerFile: maxLinesProperty("paths/ranges mode: lines per file."),
           maxBytesPerFile: maxBytesProperty("paths/ranges mode: bytes per file."),
@@ -139,6 +178,44 @@ export const tools = {
             minimum: 10,
             maximum: 500,
             description: "paths mode: total line cap. Default: 200.",
+          },
+        },
+      },
+    },
+    {
+      name: "snippets",
+      description:
+        "Read focused line-range snippets from compact spec or range objects.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          spec: { type: "string", description: "Compact range pack, e.g. file:1-80,file2:20-60." },
+          ranges: {
+            type: "array",
+            minItems: 1,
+            maxItems: 20,
+            items: {
+              type: "object",
+              properties: {
+                path: { type: "string", description: "Snippet file path." },
+                fromLine: { type: "integer", minimum: 1, description: "First 1-based line." },
+                toLine: { type: "integer", minimum: 1, description: "Last 1-based line." },
+              },
+              required: ["path"],
+              minProperties: 2,
+              additionalProperties: false,
+            },
+            description: "Focused ranges, max 20; each item needs fromLine or toLine.",
+          },
+          lineNumbers: { type: "boolean", description: "Number snippet lines. Default: true unless set false." },
+          maxLinesPerFile: maxLinesProperty("Lines per snippet."),
+          maxBytesPerFile: maxBytesProperty("Bytes per snippet."),
+          maxTotalBytes: maxBytesProperty("Total snippet-pack byte cap."),
+          maxTotalLines: {
+            type: "integer",
+            minimum: 10,
+            maximum: 500,
+            description: "Total snippet-pack line cap. Default: 200.",
           },
         },
       },
@@ -155,9 +232,10 @@ export const tools = {
           path: { type: "string", description: "Search path. Default: ." },
           include: { type: "string", description: "Include glob, not regex, e.g. *.js." },
           language: { type: "string", description: "ast-grep language when not inferred." },
+          mode: { type: "string", enum: ["search", "plan"], description: "Text mode: search returns matches; plan summarizes files/counts/suggestions." },
           contextLines: { type: "integer", minimum: 0, maximum: 10, default: 0, description: "Context lines. Ignored when filesOnly=true. Default: 0." },
-          literal: { type: "boolean", description: "Text engine only: treat pattern as a fixed string (ripgrep --fixed-strings). Default: false." },
-          filesOnly: { type: "boolean", description: "Text engine only: return matching file paths; contextLines adds no content. Default: false." },
+          literal: { type: "boolean", description: "Text only: treat pattern as fixed string. Default: false." },
+          filesOnly: { type: "boolean", description: "Text only: return matching file paths. Default: false." },
           maxMatches: {
             type: "integer",
             minimum: 1,
@@ -172,22 +250,62 @@ export const tools = {
       },
     },
     {
-      name: "discover",
+      name: "search-plan",
       description:
-        "Discover repo summary, files, tree, or source outline before broad reads.",
+        "Plan a bounded text search with matching files, counts, and next-step suggestions.",
       inputSchema: {
         type: "object",
         properties: {
-          mode: { type: "string", enum: ["summary", "files", "tree", "outline"], description: "Mode. Default: summary." },
+          pattern: { type: "string", description: "Regex for text unless literal=true." },
+          path: { type: "string", description: "Search path. Default: ." },
+          include: { type: "string", description: "Include glob, not regex, e.g. *.js." },
+          literal: { type: "boolean", description: "Treat pattern as a fixed string. Default: false." },
+          contextLines: { type: "integer", minimum: 0, maximum: 10, default: 0, description: "Context hint for follow-up search. Default: 0." },
+          maxMatches: {
+            type: "integer",
+            minimum: 1,
+            maximum: 1000,
+            default: 100,
+            description: "File summary cap. Default: 100.",
+          },
+          maxLines: maxLinesProperty(),
+          maxBytes: maxBytesProperty(),
+        },
+        required: ["pattern"],
+      },
+    },
+    {
+      name: "discover",
+      description:
+        "Discover repo summary, files, tree, filesystem inventory, or source outline before broad reads.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          mode: { type: "string", enum: ["summary", "files", "tree", "outline", "inventory"], description: "Mode. Default: summary." },
           path: { type: "string", description: "Path. Default: .; outline requires a file." },
           include: { type: "string", description: "Regex filter for file paths." },
-          maxFiles: { type: "integer", minimum: 1, maximum: 5000, description: "files: file cap. Default: 500." },
-          maxDepth: { type: "integer", minimum: 1, maximum: 10, description: "tree: depth cap. Default: 3." },
+          exclude: { type: "string", description: "inventory: regex exclusion filter for file paths." },
+          maxFiles: { type: "integer", minimum: 1, maximum: 5000, description: "files/inventory: file cap. Default: 500." },
+          maxDepth: { type: "integer", minimum: 1, maximum: 10, description: "tree/inventory: depth cap. Defaults: tree 3, inventory 5." },
           maxEntries: { type: "integer", minimum: 1, maximum: 2000, description: "tree: entry cap. Default: 200." },
           maxSymbols: { type: "integer", minimum: 1, maximum: 1000, default: 200, description: "outline: symbol cap. Default: 200." },
           maxLines: maxLinesProperty(),
           maxBytes: maxBytesProperty(),
         },
+      },
+    },
+    {
+      name: "resolve",
+      description:
+        "Resolve a path or suggest close candidates under the project/root.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Path to resolve; accepts relative and Windows/POSIX separators." },
+          root: { type: "string", description: "Search root for missing-path candidates. Default: current project." },
+          maxMatches: { type: "integer", minimum: 1, maximum: 50, default: 10, description: "Candidate cap. Default: 10." },
+        },
+        required: ["path"],
       },
     },
     {
@@ -209,7 +327,7 @@ export const tools = {
     {
       name: "diff",
       description:
-        "Show compact git diff, changed-file list, summary, tracked status, or commit history. Untracked files are excluded.",
+        "Inspect path-scoped git diffs, changed files, summaries, status, or file history; untracked excluded.",
       inputSchema: {
         type: "object",
         properties: {
@@ -221,7 +339,7 @@ export const tools = {
             type: "integer",
             minimum: 1,
             maximum: 100,
-            description: "diff/files/summary: file cap. Default: 20.",
+            description: "diff/files/summary file cap. Default: 20.",
           },
           maxCommits: {
             type: "integer",
@@ -242,6 +360,53 @@ export const tools = {
       },
     },
     {
+      name: "git",
+      description:
+        "Read-only repo workflow dashboard: overview, precommit checks, and decorated history.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          mode: { type: "string", enum: ["overview", "precommit", "history"], description: "Mode. Default: overview." },
+          maxFiles: {
+            type: "integer",
+            minimum: 1,
+            maximum: 100,
+            default: 20,
+            description: "overview/precommit file cap. Default: 20.",
+          },
+          maxCommits: {
+            type: "integer",
+            minimum: 1,
+            maximum: 100,
+            default: 20,
+            description: "history: commit cap. Default: 20.",
+          },
+          maxLines: maxLinesProperty(),
+          maxBytes: maxBytesProperty(),
+        },
+      },
+    },
+    {
+      name: "env",
+      description:
+        "Probe environment and execute PATH version commands for requested tools.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tools: {
+            type: "array",
+            minItems: 1,
+            maxItems: 50,
+            items: { type: "string" },
+            description: "Bare command names to version-probe from PATH. Default includes git, node, npm, rg.",
+          },
+          includePath: { type: "boolean", description: "Include PATH entries in output. Default: false." },
+          maxLines: maxLinesProperty(),
+          maxBytes: maxBytesProperty(),
+        },
+      },
+    },
+    {
       name: "usage",
       description:
         "Show savings stats, usage report, or guidance.",
@@ -249,6 +414,7 @@ export const tools = {
         type: "object",
         properties: {
           mode: { type: "string", enum: ["stats", "report", "guidance"], description: "Mode. Default: stats." },
+          project: { type: "string", description: "Report/guidance filter: omit for current project, 'all', or a project path." },
           maxEvents: { type: "integer", minimum: 1, maximum: 10000, default: 1000, description: "Event cap. Default: 1000." },
           maxLines: maxLinesProperty(),
           maxBytes: maxBytesProperty(),
@@ -261,11 +427,18 @@ export const tools = {
 const handlers = {
   run: runTool,
   logs: logsTool,
+  validate: validateTool,
+  process: processTool,
   read: readTool,
+  snippets: readSnippetsTool,
   search: searchTool,
+  "search-plan": (args) => searchTool({ ...args, mode: "plan" }),
   discover: discoverTool,
+  resolve: resolveTool,
   fetch: fetchTool,
   diff: diffTool,
+  git: gitTool,
+  env: envTool,
   usage: usageTool,
 };
 
@@ -307,11 +480,23 @@ function validateSchemaArgs(name, args) {
   }
 
   for (const [key, value] of Object.entries(input)) {
-    validateSchemaValue(name, key, value, properties[key]);
+    validateSchemaValue(name, key, value, properties[key], input);
   }
 }
 
-function validateSchemaValue(toolName, key, value, schema) {
+function schemaMaxHint(toolName, key, schema, rootInput) {
+  if (!["sc-read", "read", "sc-snippets", "snippets"].includes(toolName)) return "";
+  const parameter = key.split(".").pop();
+  if (!["maxLines", "maxLinesPerFile", "maxTotalLines"].includes(parameter)) return "";
+
+  const packMode = rootInput?.paths !== undefined || rootInput?.ranges !== undefined || rootInput?.spec !== undefined;
+  const splitHint = parameter === "maxLines" && !packMode
+    ? "Use a smaller range or split the request if you need more context."
+    : "For multi-file or multi-range packs, split the request or use smaller ranges/per-file limits.";
+  return `; set ${parameter} to ${schema.maximum} or less. ${splitHint}`;
+}
+
+function validateSchemaValue(toolName, key, value, schema, rootInput) {
   if (!schema || value === undefined) return;
 
   if (schema.type === "integer") {
@@ -319,7 +504,7 @@ function validateSchemaValue(toolName, key, value, schema) {
     const range = schema.maximum === undefined ? `>= ${schema.minimum}` : `between ${schema.minimum} and ${schema.maximum}`;
     if (typeof value !== "number" || !Number.isInteger(value)) invalidToolParams(`${label} must be an integer ${range}`);
     if (schema.minimum !== undefined && value < schema.minimum) invalidToolParams(`${label} must be ${range}`);
-    if (schema.maximum !== undefined && value > schema.maximum) invalidToolParams(`${label} must be ${range}`);
+    if (schema.maximum !== undefined && value > schema.maximum) invalidToolParams(`${label} must be ${range}${schemaMaxHint(toolName, key, schema, rootInput)}`);
     return;
   }
 
@@ -328,7 +513,7 @@ function validateSchemaValue(toolName, key, value, schema) {
     if (schema.minItems !== undefined && value.length < schema.minItems) invalidToolParams(`${toolName} ${key} must contain at least ${schema.minItems} item(s)`);
     if (schema.maxItems !== undefined && value.length > schema.maxItems) invalidToolParams(`${toolName} ${key} must contain at most ${schema.maxItems} item(s)`);
     if (schema.items) {
-      for (const [index, item] of value.entries()) validateSchemaValue(toolName, `${key}[${index}]`, item, schema.items);
+      for (const [index, item] of value.entries()) validateSchemaValue(toolName, `${key}[${index}]`, item, schema.items, rootInput);
     }
     return;
   }
@@ -345,7 +530,7 @@ function validateSchemaValue(toolName, key, value, schema) {
       if (value[required] === undefined) invalidToolParams(`Missing required argument for ${schemaLabel(toolName, key)}: ${required}`);
     }
     for (const [property, propertyValue] of Object.entries(value)) {
-      validateSchemaValue(toolName, `${key}.${property}`, propertyValue, properties[property]);
+      validateSchemaValue(toolName, `${key}.${property}`, propertyValue, properties[property], rootInput);
     }
     return;
   }

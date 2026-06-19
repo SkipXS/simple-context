@@ -7,12 +7,9 @@ const os = await import("node:os");
 const path = await import("node:path");
 const { describe, it } = await import("node:test");
 const { callTool } = await import("../src/tools.js");
-const { findRg } = await import("../src/tools/search.js");
 
 await describe("sc-search", async () => {
-  await it("finds bounded text matches with metadata", async (t) => {
-    if (!await findRg()) return t.skip("rg not available");
-
+  await it("finds bounded text matches with metadata", async () => {
     await withTempProject(async (dir) => {
       await seedSearchProject(dir);
 
@@ -29,9 +26,7 @@ await describe("sc-search", async () => {
     });
   });
 
-  await it("searches text as a fixed string when literal is true", async (t) => {
-    if (!await findRg()) return t.skip("rg not available");
-
+  await it("searches text as a fixed string when literal is true", async () => {
     await withTempProject(async (dir) => {
       await fs.writeFile(path.join(dir, "literal.txt"), "a.b exact\naxb regex-only\n", "utf8");
 
@@ -46,9 +41,7 @@ await describe("sc-search", async () => {
     });
   });
 
-  await it("returns only matching file paths when filesOnly is true", async (t) => {
-    if (!await findRg()) return t.skip("rg not available");
-
+  await it("returns only matching file paths when filesOnly is true", async () => {
     await withTempProject(async (dir) => {
       await seedSearchProject(dir);
 
@@ -67,9 +60,7 @@ await describe("sc-search", async () => {
     });
   });
 
-  await it("combines literal and filesOnly with include and path filtering", async (t) => {
-    if (!await findRg()) return t.skip("rg not available");
-
+  await it("combines literal and filesOnly with include and path filtering", async () => {
     await withTempProject(async (dir) => {
       await fs.mkdir(path.join(dir, "src"));
       await fs.writeFile(path.join(dir, "src", "one.txt"), "a.b exact\n", "utf8");
@@ -89,9 +80,7 @@ await describe("sc-search", async () => {
     });
   });
 
-  await it("reports no matches without treating rg exit 1 as an error", async (t) => {
-    if (!await findRg()) return t.skip("rg not available");
-
+  await it("reports no matches without treating rg exit 1 as an error", async () => {
     await withTempProject(async (dir) => {
       await seedSearchProject(dir);
 
@@ -104,9 +93,81 @@ await describe("sc-search", async () => {
     });
   });
 
-  await it("line-limits text matches before collecting too many results", async (t) => {
-    if (!await findRg()) return t.skip("rg not available");
+  await it("summarizes text search in plan mode with counts and suggestions", async () => {
+    await withTempProject(async (dir) => {
+      await seedSearchProject(dir);
+      await fs.writeFile(path.join(dir, "a.txt"), "alpha needle\nneedle again\nplain\n", "utf8");
 
+      const result = await callTool("sc-search", { mode: "plan", pattern: "needle", path: ".", include: "*.txt", maxMatches: 5, maxLines: 80, maxBytes: 8192 });
+      const text = result.content[0].text;
+
+      assert.match(text, /Search plan: text "needle" in \.; include \*\.txt; 2 files summarized/);
+      assert.match(text, /a\.txt: 2 matches/);
+      assert.match(text, /b\.txt: 1 match/);
+      assert.match(text, /Suggestions:/);
+      assert.match(text, /literal:true/);
+      assert.doesNotMatch(text, /alpha needle/);
+      assert.equal(result._meta.mode, "plan");
+      assert.equal(result._meta.totalFiles, 2);
+      assert.equal(result._meta.totalMatches, 3);
+      assert.equal(result._meta.totalMatchesKnown, true);
+      assert.equal(result._meta.truncated, false);
+    });
+  });
+
+  await it("dispatches sc-search-plan as focused plan-mode text search", async () => {
+    await withTempProject(async (dir) => {
+      await seedSearchProject(dir);
+      await fs.writeFile(path.join(dir, "a.txt"), "alpha needle\nneedle again\nplain\n", "utf8");
+      const args = { pattern: "needle", path: ".", include: "*.txt", maxMatches: 5, maxLines: 80, maxBytes: 8192 };
+
+      const focused = await callTool("sc-search-plan", args);
+      const legacy = await callTool("sc-search", { mode: "plan", ...args });
+
+      assert.equal(focused.content[0].text, legacy.content[0].text);
+      assert.deepEqual(withoutDynamicSearchMeta(focused._meta), withoutDynamicSearchMeta(legacy._meta));
+      assert.equal(focused._meta.mode, "plan");
+      assert.match(focused.content[0].text, /Search plan: text "needle" in \.; include \*\.txt; 2 files summarized/);
+      assert.doesNotMatch(focused.content[0].text, /or filesOnly:true/);
+      assert.match(focused.content[0].text, /use sc-search with filesOnly:true/);
+    });
+  });
+
+  await it("handles no matches in plan mode with bounded guidance", async () => {
+    await withTempProject(async (dir) => {
+      await seedSearchProject(dir);
+
+      const result = await callTool("sc-search", { mode: "plan", pattern: "missing-pattern", path: ".", include: "*.txt", maxLines: 80, maxBytes: 8192 });
+      const text = result.content[0].text;
+
+      assert.match(text, /Search plan: text "missing-pattern" in \.; include \*\.txt; 0 files summarized/);
+      assert.match(text, /\(no matches\)/);
+      assert.match(text, /Suggestions:/);
+      assert.equal(result._meta.empty, true);
+      assert.equal(result._meta.emptyReason, "no_matches");
+      assert.equal(result._meta.totalMatches, 0);
+      assert.equal(result._meta.totalFiles, 0);
+    });
+  });
+
+  await it("adds literal guidance for regex errors", async () => {
+    await withTempProject(async (dir) => {
+      await seedSearchProject(dir);
+
+      await assert.rejects(
+        callTool("sc-search", { pattern: "[", path: ".", include: "*.txt" }),
+        (error) => {
+          assert.match(error.message, /regex\/search error/);
+          assert.match(error.message, /literal:true/);
+          assert.match(error.message, /check regex syntax/);
+          assert.equal(error.status, 2);
+          return true;
+        },
+      );
+    });
+  });
+
+  await it("line-limits text matches before collecting too many results", async () => {
     await withTempProject(async (dir) => {
       await fs.writeFile(path.join(dir, "many.txt"), Array.from({ length: 20 }, (_, index) => `needle ${index}`).join("\n"), "utf8");
 
@@ -224,14 +285,22 @@ await describe("sc-search", async () => {
   });
 });
 
+function withoutDynamicSearchMeta(meta) {
+  const { durationMs, ...stable } = meta;
+  return stable;
+}
+
 async function withTempProject(callback) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "scl-search-test-"));
   const previousCwd = process.cwd();
+  const previousRgPath = process.env.SIMPLE_CONTEXT_RG_PATH;
   try {
+    process.env.SIMPLE_CONTEXT_RG_PATH = await writeFakeRg(dir);
     process.chdir(dir);
     return await callback(dir);
   } finally {
     process.chdir(previousCwd);
+    restoreEnv("SIMPLE_CONTEXT_RG_PATH", previousRgPath);
     await rmWithRetries(dir);
   }
 }
@@ -259,6 +328,20 @@ async function seedAstProject(dir) {
   await fs.mkdir(path.join(dir, "src"), { recursive: true });
   await fs.writeFile(path.join(dir, "src", "one.js"), "console.log(\"one\");\n", "utf8");
   await fs.writeFile(path.join(dir, "src", "two.js"), "const value = 1;\n  console.log(\"two\");\n", "utf8");
+}
+
+async function writeFakeRg(dir) {
+  const scriptPath = path.join(dir, "fake-rg.mjs");
+  await fs.writeFile(scriptPath, fakeRgSource(), "utf8");
+
+  if (process.platform === "win32") {
+    const commandPath = path.join(dir, "fake-rg.cmd");
+    await fs.writeFile(commandPath, `@echo off\r\n"${process.execPath}" "${scriptPath}" %*\r\n`, "utf8");
+    return commandPath;
+  }
+
+  await fs.chmod(scriptPath, 0o755);
+  return scriptPath;
 }
 
 async function writeFakeAstGrep(dir) {
@@ -305,6 +388,73 @@ function setOptionalEnv(name, value) {
 function restoreEnv(name, value) {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
+}
+
+function fakeRgSource() {
+  return `#!/usr/bin/env node
+import * as fs from "node:fs";
+import * as path from "node:path";
+
+const args = process.argv.slice(2);
+const fixed = args.includes("--fixed-strings");
+const filesOnly = args.includes("--files-with-matches");
+const countMatches = args.includes("--count-matches");
+const include = flagValue("--glob");
+const separator = flagValue("--field-match-separator") || ":";
+const dash = args.indexOf("--");
+const pattern = dash === -1 ? args.at(-2) : args[dash + 1];
+const searchPath = dash === -1 ? args.at(-1) : args[dash + 2];
+
+let matcher;
+try {
+  matcher = fixed ? undefined : new RegExp(pattern);
+} catch (error) {
+  console.error("regex parse error: " + error.message);
+  process.exit(2);
+}
+
+const files = listFiles(path.resolve(process.cwd(), searchPath || "."));
+let hadMatch = false;
+for (const file of files) {
+  const relative = path.relative(process.cwd(), file).split(path.sep).join("/");
+  if (include && !matchesGlob(relative, include)) continue;
+  const lines = fs.readFileSync(file, "utf8").split(/\\r?\\n/);
+  const matches = [];
+  for (let index = 0; index < lines.length; index++) {
+    if (lineMatches(lines[index], pattern, fixed, matcher)) matches.push({ lineNumber: index + 1, text: lines[index] });
+  }
+  if (matches.length === 0) continue;
+  hadMatch = true;
+  if (filesOnly) console.log(relative);
+  else if (countMatches) console.log(relative + ":" + matches.length);
+  else for (const match of matches) console.log(relative + separator + match.lineNumber + separator + match.text);
+}
+process.exit(hadMatch ? 0 : 1);
+
+function flagValue(flag) {
+  const index = args.indexOf(flag);
+  return index === -1 ? undefined : args[index + 1];
+}
+function lineMatches(line, pattern, fixed, matcher) {
+  return fixed ? line.includes(pattern) : matcher.test(line);
+}
+function matchesGlob(relative, glob) {
+  if (glob === "*.txt") return relative.endsWith(".txt");
+  if (glob.startsWith("*.")) return relative.endsWith(glob.slice(1));
+  return relative === glob || relative.endsWith("/" + glob);
+}
+function listFiles(root) {
+  if (!fs.existsSync(root)) return [];
+  const stat = fs.statSync(root);
+  if (stat.isFile()) return [root];
+  return fs.readdirSync(root, { withFileTypes: true })
+    .flatMap((entry) => {
+      const full = path.join(root, entry.name);
+      return entry.isDirectory() ? listFiles(full) : [full];
+    })
+    .sort();
+}
+`;
 }
 
 function fakeAstGrepSource() {

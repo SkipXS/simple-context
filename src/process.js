@@ -32,7 +32,8 @@ function spawnTarget(file, args, options = {}) {
 
     return {
       file: process.env.ComSpec || "cmd.exe",
-      args: ["/d", "/s", "/c", ["call", file, ...args.map(escapeWindowsCmdArg)].join(" ")],
+      args: ["/d", "/s", "/c", buildWindowsCommandShimCommandLine(file, args)],
+      windowsVerbatimArguments: true,
     };
   }
 
@@ -54,8 +55,12 @@ function resolveNpmCommandShim(file) {
   }
 }
 
-function escapeWindowsCmdArg(value) {
-  return String(value).replace(/[()%!^"<>&|]/g, "^$&");
+export function buildWindowsCommandShimCommandLine(file, args) {
+  return ["call", quoteWindowsCmdArg(file), ...args.map(quoteWindowsCmdArg)].join(" ");
+}
+
+function quoteWindowsCmdArg(value) {
+  return `"${String(value).replace(/[()%!^"<>&|]/g, "^$&")}"`;
 }
 
 export function terminateChild(child) {
@@ -178,21 +183,21 @@ export function errorData(error) {
   return Object.keys(data).length > 0 ? data : undefined;
 }
 
-function collectOutput(child, stdout, stderr, combined) {
+function collectOutput(child, stdout, stderr, combined, maxBytes = MAX_COMMAND_BYTES) {
   let outputBytes = 0;
   let outputTooLarge = false;
 
   function appendOutput(chunks, chunk) {
     if (outputTooLarge) return;
 
-    const remaining = MAX_COMMAND_BYTES - outputBytes;
+    const remaining = maxBytes - outputBytes;
     if (chunk.byteLength > remaining) {
       if (remaining > 0) {
         const kept = chunk.slice(0, remaining);
         chunks.push(kept);
         combined?.push(kept);
       }
-      outputBytes = MAX_COMMAND_BYTES;
+      outputBytes = maxBytes;
       outputTooLarge = true;
       terminateChild(child);
       return;
@@ -219,13 +224,14 @@ export async function runProcess(file, args, options = {}) {
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      windowsVerbatimArguments: target.windowsVerbatimArguments === true,
       detached: process.platform !== "win32",
     });
 
     const stdout = [];
     const stderr = [];
     let timedOut = false;
-    const outputTooLarge = collectOutput(child, stdout, stderr);
+    const outputTooLarge = collectOutput(child, stdout, stderr, undefined, options.maxBytes ?? MAX_COMMAND_BYTES);
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -335,6 +341,7 @@ export async function runProcessLines(file, args, options = {}) {
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      windowsVerbatimArguments: target.windowsVerbatimArguments === true,
       detached: process.platform !== "win32",
     });
 

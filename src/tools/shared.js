@@ -92,8 +92,12 @@ export function withResponseMeta(meta) {
   return { ...compact, response: responseMeta(meta) };
 }
 
-export function validateCommandPolicy(command, toolName) {
+export function validateCommandToolsEnabled(toolName) {
   if (DISABLE_COMMAND_TOOLS) invalidParams(`${toolName} is disabled by SIMPLE_CONTEXT_DISABLE_COMMAND_TOOLS`);
+}
+
+export function validateCommandPolicy(command, toolName) {
+  validateCommandToolsEnabled(toolName);
   if (COMMAND_ALLOWLIST.length === 0) return;
 
   const allowed = COMMAND_ALLOWLIST.includes(command);

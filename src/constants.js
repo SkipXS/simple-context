@@ -47,10 +47,24 @@ export const RG_NAME = process.platform === "win32" ? "rg.exe" : "rg";
 const PROJECT_MARKERS = [".git", "package.json", "pyproject.toml", "Cargo.toml", "go.mod", "pom.xml", "build.gradle", "deno.json", "deno.jsonc"];
 
 export function projectKey() {
-  const cwd = canonicalPath(process.cwd());
-  const projectRoot = findProjectRoot(cwd);
+  return projectKeyForPath(process.cwd(), { ignoreTemp: true });
+}
+
+export function projectKeyForPath(value, { ignoreTemp = false } = {}) {
+  const candidate = canonicalPath(value);
+  const startDir = existingDirectoryForProjectKey(candidate);
+  const projectRoot = startDir ? findProjectRoot(startDir) : undefined;
   if (projectRoot) return projectRoot;
-  return isTempPath(cwd) ? undefined : cwd;
+  return ignoreTemp && isTempPath(candidate) ? undefined : candidate;
+}
+
+function existingDirectoryForProjectKey(value) {
+  try {
+    const stat = fs.statSync(value);
+    return stat.isDirectory() ? value : path.dirname(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function findProjectRoot(startDir) {

@@ -134,6 +134,7 @@ export async function searchTool(args) {
     contextLines = 0,
     literal = false,
     filesOnly = false,
+    mode = "search",
     maxMatches = 100,
     maxLines = MAX_LINES,
     maxBytes = DEFAULT_BYTES,
@@ -160,6 +161,9 @@ export async function searchTool(args) {
   if (typeof filesOnly !== "boolean") {
     invalidParams("search filesOnly must be a boolean when provided");
   }
+  if (mode !== "search" && mode !== "plan") {
+    invalidParams("search mode must be \"search\" or \"plan\"");
+  }
   const contextLimit = validateInteger(contextLines, "search contextLines", 0, 10);
   const limit = validateInteger(maxMatches, "search maxMatches", 1, 1000);
   const lineLimit = validateInteger(maxLines, "search maxLines", 10, 500);
@@ -169,6 +173,7 @@ export async function searchTool(args) {
   const commandSearchPath = relativePath(searchPath);
 
   if (engine === "ast") {
+    if (mode === "plan") invalidParams("search mode plan is only supported for text engine");
     if (literal) invalidParams("search literal is only supported for text engine");
     if (filesOnly) invalidParams("search filesOnly is only supported for text engine");
     const astLanguage = normalizeAstLanguage(language, searchPath, include);
@@ -185,6 +190,10 @@ export async function searchTool(args) {
     );
     error.code = -32000;
     throw error;
+  }
+
+  if (mode === "plan") {
+    return await searchPlan(rg, pattern, commandSearchPath, include, { literal, contextLines: contextLimit, maxMatches: limit, maxLines: lineLimit, maxBytes: byteLimit });
   }
 
   if (filesOnly) {
@@ -205,6 +214,7 @@ export async function searchTool(args) {
     timeout: 120_000,
     maxLines: limit + 1,
     maxBytes: MAX_READ_BYTES,
+    windowsCommandShim: isWindowsCommandShim(rg),
   });
   if (result.code === 1) {
     const text = "(no matches)";
@@ -233,7 +243,7 @@ export async function searchTool(args) {
     };
   }
   if (result.code !== 0 && !result.truncated && !result.outputTooLarge) {
-    commandError(`rg ${rgArgs.join(" ")}`, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge);
+    rgCommandError(rgArgs, result);
   }
 
   const matches = result.lines.map(normalizeRgMatchLine);
@@ -467,6 +477,139 @@ function limitAstContextEntries(entries) {
   ];
 }
 
+async function searchPlan(rg, pattern, searchPath, include, { literal, contextLines, maxMatches, maxLines, maxBytes }) {
+  const rgArgs = ["--count-matches", "--with-filename", "--color", "never", "--no-heading"];
+  if (literal) rgArgs.push("--fixed-strings");
+  if (include) rgArgs.push("--glob", include);
+  rgArgs.push("--", pattern, searchPath);
+
+  const result = await runProcessLines(rg, rgArgs, {
+    cwd: process.cwd(),
+    timeout: 120_000,
+    maxLines: maxMatches + 1,
+    maxBytes: MAX_READ_BYTES,
+    windowsCommandShim: isWindowsCommandShim(rg),
+  });
+
+  if (result.code === 1) return await noMatchPlan(rg, result.durationMs, { pattern, searchPath, include, literal, contextLines, maxLines, maxBytes });
+  if (result.code !== 0 && !result.truncated && !result.outputTooLarge) {
+    rgCommandError(rgArgs, result);
+  }
+
+  const counts = result.lines.map(parseRgCountLine).filter(Boolean);
+  const fileLimited = result.truncated || result.outputTooLarge || counts.length > maxMatches;
+  const shown = counts.slice(0, maxMatches);
+  const totalMatches = fileLimited ? undefined : shown.reduce((sum, entry) => sum + entry.count, 0);
+  const body = [
+    searchPlanHeader({ pattern, searchPath, include, literal, shownFiles: shown.length }),
+    ...shown.map((entry) => `${relativePath(entry.file)}: ${entry.count} ${entry.count === 1 ? "match" : "matches"}`),
+    fileLimited ? truncatedFilesLine(shown.length) : undefined,
+    "",
+    ...searchPlanSuggestions({ searchPath, include, literal, contextLines }),
+  ].filter((line) => line !== undefined).join("\n");
+  const formatted = formatOutput(body, maxLines, maxBytes);
+  const truncated = fileLimited || formatted.truncated;
+  const meta = withResponseMeta({
+    rgPath: rg,
+    mode: "plan",
+    literal,
+    contextLines,
+    totalFiles: fileLimited ? undefined : shown.length,
+    totalFilesKnown: !fileLimited,
+    filesRead: fileLimited ? counts.length : undefined,
+    shownFiles: shown.length,
+    totalMatches,
+    totalMatchesKnown: !fileLimited,
+    matchesRead: fileLimited ? shown.reduce((sum, entry) => sum + entry.count, 0) : undefined,
+    shownMatches: totalMatches ?? shown.reduce((sum, entry) => sum + entry.count, 0),
+    totalLines: formatted.totalLines,
+    totalBytes: formatted.totalBytes,
+    ...savingsMeta(formatted),
+    truncated,
+    ...truncationMeta(truncated, searchTruncationReason({ matchLimited: fileLimited, result, formatted, maxLines, maxBytes }), searchTruncationHint),
+    empty: false,
+    durationMs: result.durationMs,
+  });
+  await recordStats("search", meta);
+
+  return toolTextResult(formatted.text, meta, maxBytes);
+}
+
+function parseRgCountLine(line) {
+  const match = String(line).match(/^(.*):(\d+)$/);
+  if (!match) return undefined;
+  return { file: match[1], count: Number.parseInt(match[2], 10) };
+}
+
+function searchPlanHeader({ pattern, searchPath, include, literal, shownFiles }) {
+  const noun = shownFiles === 1 ? "file" : "files";
+  const parts = [
+    `Search plan: text ${quoteCompact(pattern)} in ${searchPath || "."}`,
+    include ? `include ${include}` : undefined,
+    literal ? "literal" : undefined,
+    `${shownFiles} ${noun} summarized`,
+  ].filter(Boolean);
+  return parts.join("; ");
+}
+
+function searchPlanSuggestions({ searchPath, include, literal, contextLines }) {
+  const suggestions = ["Suggestions:"];
+  if (!literal) suggestions.push("- If this is a plain string, retry with literal:true to avoid regex interpretation.");
+  if (!searchPath || searchPath === ".") suggestions.push("- Narrow path to a subdirectory when you know where matches should be.");
+  if (!include) suggestions.push("- Add include such as \"*.js\" or \"src/**/*.ts\" to reduce searched files.");
+  if (contextLines === 0) suggestions.push("- Use contextLines when you need surrounding lines, or use sc-search with filesOnly:true when filenames are enough.");
+  else suggestions.push("- Lower contextLines or maxMatches if normal search output would be too large.");
+  suggestions.push("- Use maxMatches/maxLines/maxBytes to adjust this bounded summary.");
+  return suggestions;
+}
+
+async function noMatchPlan(rg, durationMs, { pattern, searchPath, include, literal, contextLines, maxLines, maxBytes }) {
+  const body = [
+    searchPlanHeader({ pattern, searchPath, include, literal, shownFiles: 0 }),
+    "(no matches)",
+    "",
+    ...searchPlanSuggestions({ searchPath, include, literal, contextLines }),
+  ].join("\n");
+  const formatted = formatOutput(body, maxLines, maxBytes);
+  const meta = withResponseMeta({
+    rgPath: rg,
+    mode: "plan",
+    literal,
+    contextLines,
+    totalFiles: 0,
+    totalFilesKnown: true,
+    shownFiles: 0,
+    totalMatches: 0,
+    totalMatchesKnown: true,
+    shownMatches: 0,
+    totalLines: formatted.totalLines,
+    totalBytes: formatted.totalBytes,
+    ...savingsMeta(formatted),
+    truncated: formatted.truncated,
+    ...truncationMeta(formatted.truncated, formatTruncationReason(formatted, maxLines, maxBytes), searchTruncationHint),
+    empty: true,
+    emptyReason: "no_matches",
+    durationMs,
+  });
+  await recordStats("search", meta);
+  return toolTextResult(formatted.text, meta, maxBytes);
+}
+
+function rgCommandError(rgArgs, result) {
+  if (result.code === 2) {
+    const stderr = result.stderr ? `\n${result.stderr.trim()}` : "";
+    const error = new Error(`Command failed: rg ${rgArgs.join(" ")} (exited with code 2). ripgrep reported a regex/search error. If your pattern is a plain string, retry with literal:true; otherwise check regex syntax and escaping.${stderr}`);
+    error.status = result.code;
+    error.signal = result.signal;
+    error.stdout = result.stdout;
+    error.stderr = result.stderr;
+    error.timedOut = result.timedOut;
+    error.outputTooLarge = result.outputTooLarge;
+    throw error;
+  }
+  commandError(`rg ${rgArgs.join(" ")}`, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge);
+}
+
 async function searchFilesOnly(rg, pattern, searchPath, include, { literal, contextLines, maxMatches, maxLines, maxBytes }) {
   const rgArgs = ["--files-with-matches", "--color", "never"];
   if (literal) rgArgs.push("--fixed-strings");
@@ -478,6 +621,7 @@ async function searchFilesOnly(rg, pattern, searchPath, include, { literal, cont
     timeout: 120_000,
     maxLines: maxMatches + 1,
     maxBytes: MAX_READ_BYTES,
+    windowsCommandShim: isWindowsCommandShim(rg),
   });
   if (result.code === 1) {
     const text = "(no matches)";
@@ -508,7 +652,7 @@ async function searchFilesOnly(rg, pattern, searchPath, include, { literal, cont
     return { content: [{ type: "text", text }], _meta: meta };
   }
   if (result.code !== 0 && !result.truncated && !result.outputTooLarge) {
-    commandError(`rg ${rgArgs.join(" ")}`, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge);
+    rgCommandError(rgArgs, result);
   }
 
   const files = result.lines.map((line) => relativePath(line));
@@ -578,10 +722,11 @@ async function searchWithContext(rg, pattern, searchPath, include, literal, cont
     timeout: 120_000,
     maxLines: (maxMatches + 1) * (contextLines * 2 + 3) + 20,
     maxBytes: MAX_READ_BYTES,
+    windowsCommandShim: isWindowsCommandShim(rg),
   });
   if (result.code === 1) return await noMatches(rg, result.durationMs, contextLines);
   if (result.code !== 0 && !result.truncated && !result.outputTooLarge) {
-    commandError(`rg ${rgArgs.join(" ")}`, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge);
+    rgCommandError(rgArgs, result);
   }
 
   const limited = limitRgContext(result.lines, maxMatches, contextLines);

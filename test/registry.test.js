@@ -10,7 +10,7 @@ await describe("tool registry", async () => {
   await it("exposes only prefixed public tool names with matching handlers", () => {
     const names = tools.tools.map((tool) => tool.name);
 
-    assert.equal(names.length, 8);
+    assert.equal(names.length, 15);
     assert.ok(names.every((name) => name.startsWith("sc-")));
     assert.equal(new Set(names).size, names.length);
     assert.deepEqual([...names].sort(), registeredToolNamesForTest().sort());
@@ -40,7 +40,11 @@ await describe("tool registry", async () => {
         assert.ok(propertySchema.maximum >= propertySchema.default);
       }
       if (propertyName === "timeoutMs") {
-        assert.equal(propertySchema.default, COMMON_SCHEMA_DEFAULTS.timeoutMs, `${toolName} timeoutMs default drifted`);
+        if (toolName === "sc-process") {
+          assert.equal(propertySchema.default, 1000);
+        } else {
+          assert.equal(propertySchema.default, COMMON_SCHEMA_DEFAULTS.timeoutMs, `${toolName} timeoutMs default drifted`);
+        }
         assert.equal(propertySchema.minimum, 100);
         assert.equal(propertySchema.maximum, 1800000);
       }
@@ -49,17 +53,69 @@ await describe("tool registry", async () => {
 
   await it("describes new read/search/diff schema features without drift", () => {
     const readTool = tools.tools.find((tool) => tool.name === "sc-read");
+    const snippetsTool = tools.tools.find((tool) => tool.name === "sc-snippets");
     const searchTool = tools.tools.find((tool) => tool.name === "sc-search");
+    const searchPlanTool = tools.tools.find((tool) => tool.name === "sc-search-plan");
     const diffTool = tools.tools.find((tool) => tool.name === "sc-diff");
+    const validateTool = tools.tools.find((tool) => tool.name === "sc-validate");
+    const processTool = tools.tools.find((tool) => tool.name === "sc-process");
+    const gitTool = tools.tools.find((tool) => tool.name === "sc-git");
+    const resolveTool = tools.tools.find((tool) => tool.name === "sc-resolve");
+    const envTool = tools.tools.find((tool) => tool.name === "sc-env");
 
     assert.equal(readTool.inputSchema.properties.ranges.maxItems, 20);
+    assert.equal(readTool.inputSchema.properties.spec.type, "string");
+    assert.match(readTool.inputSchema.properties.spec.description, /file:1-80,file2:20-60/);
     assert.match(readTool.inputSchema.properties.lineNumbers.description, /path\/paths default false/);
     assert.match(readTool.inputSchema.properties.lineNumbers.description, /ranges default true/);
+    assert.deepEqual(Object.keys(snippetsTool.inputSchema.properties).sort(), ["lineNumbers", "maxBytesPerFile", "maxLinesPerFile", "maxTotalBytes", "maxTotalLines", "ranges", "spec"].sort());
+    assert.equal(snippetsTool.inputSchema.properties.path, undefined);
+    assert.equal(snippetsTool.inputSchema.properties.paths, undefined);
+    assert.equal(snippetsTool.inputSchema.properties.fromLine, undefined);
+    assert.equal(snippetsTool.inputSchema.properties.toLine, undefined);
+    assert.equal(snippetsTool.inputSchema.properties.ranges.maxItems, 20);
+    assert.equal(snippetsTool.inputSchema.properties.ranges.items.additionalProperties, false);
+    assert.equal(snippetsTool.inputSchema.properties.ranges.items.minProperties, 2);
+    assert.match(snippetsTool.inputSchema.properties.ranges.description, /fromLine or toLine/);
+    assert.match(snippetsTool.description, /line-range snippets/);
     assert.equal(searchTool.inputSchema.properties.literal.type, "boolean");
     assert.equal(searchTool.inputSchema.properties.filesOnly.type, "boolean");
+    assert.deepEqual(searchTool.inputSchema.properties.mode.enum, ["search", "plan"]);
+    assert.deepEqual(searchPlanTool.inputSchema.required, ["pattern"]);
+    assert.deepEqual(Object.keys(searchPlanTool.inputSchema.properties).sort(), ["contextLines", "include", "literal", "maxBytes", "maxLines", "maxMatches", "path", "pattern"].sort());
+    assert.equal(searchPlanTool.inputSchema.properties.engine, undefined);
+    assert.equal(searchPlanTool.inputSchema.properties.language, undefined);
+    assert.equal(searchPlanTool.inputSchema.properties.filesOnly, undefined);
+    assert.equal(searchPlanTool.inputSchema.properties.mode, undefined);
     assert.deepEqual(diffTool.inputSchema.properties.mode.enum, ["diff", "status", "history", "files", "summary"]);
-    assert.match(diffTool.description, /changed-file list/);
-    assert.match(diffTool.description, /summary/);
+    assert.deepEqual(validateTool.inputSchema.properties.mode.enum, ["auto", "npm", "go", "python", "ruby", "custom"]);
+    assert.equal(validateTool.inputSchema.properties.command.type, "string");
+    assert.match(validateTool.inputSchema.properties.command.description, /only when mode is custom/);
+    assert.match(validateTool.description, /explicit command only with mode: custom/);
+    assert.deepEqual(processTool.inputSchema.properties.mode.enum, ["start", "list", "status", "logs", "stop"]);
+    assert.equal(processTool.inputSchema.properties.command.type, "string");
+    assert.equal(processTool.inputSchema.properties.id.type, "string");
+    assert.equal(processTool.inputSchema.properties.timeoutMs.default, 1000);
+    assert.match(processTool.description, /start\/stop change/);
+    assert.match(processTool.description, /list\/status\/logs inspect without project writes/);
+    assert.match(diffTool.description, /path-scoped git diffs/);
+    const discoverTool = tools.tools.find((tool) => tool.name === "sc-discover");
+    assert.deepEqual(discoverTool.inputSchema.properties.mode.enum, ["summary", "files", "tree", "outline", "inventory"]);
+    assert.equal(discoverTool.inputSchema.properties.exclude.type, "string");
+    assert.match(discoverTool.description, /filesystem inventory/);
+    assert.match(diffTool.description, /summaries/);
+    assert.deepEqual(gitTool.inputSchema.properties.mode.enum, ["overview", "precommit", "history"]);
+    assert.match(gitTool.description, /workflow dashboard/);
+    assert.match(gitTool.description, /precommit checks/);
+    assert.equal(resolveTool.inputSchema.properties.path.type, "string");
+    assert.equal(resolveTool.inputSchema.properties.root.type, "string");
+    assert.equal(resolveTool.inputSchema.properties.maxMatches.maximum, 50);
+    assert.deepEqual(resolveTool.inputSchema.required, ["path"]);
+    assert.equal(envTool.inputSchema.properties.tools.type, "array");
+    assert.equal(envTool.inputSchema.properties.tools.maxItems, 50);
+    assert.match(envTool.inputSchema.properties.tools.description, /Bare command names/);
+    assert.equal(envTool.inputSchema.properties.includePath.type, "boolean");
+    assert.match(envTool.description, /execute PATH version commands/);
   });
 
   await it("keeps advertised sc-run timeout default aligned with handler behavior", async () => {
@@ -102,6 +158,50 @@ await describe("tool registry", async () => {
     await assert.rejects(
       () => callTool("sc-diff", { mode: "patch" }),
       /diff mode must be one of: diff, status, history, files, summary/,
+    );
+    await assert.rejects(
+      () => callTool("sc-git", { mode: "status" }),
+      /git mode must be one of: overview, precommit, history/,
+    );
+    await assert.rejects(
+      () => callTool("sc-discover", { mode: "map" }),
+      /discover mode must be one of: summary, files, tree, outline, inventory/,
+    );
+    await assert.rejects(
+      () => callTool("sc-search", { pattern: "x", mode: "preview" }),
+      /search mode must be one of: search, plan/,
+    );
+    await assert.rejects(
+      () => callTool("sc-search-plan", { pattern: "x", engine: "ast" }),
+      /Unknown argument for sc-search-plan: engine/,
+    );
+    await assert.rejects(
+      () => callTool("sc-search-plan", { pattern: "x", language: "javascript" }),
+      /Unknown argument for sc-search-plan: language/,
+    );
+    await assert.rejects(
+      () => callTool("sc-search-plan", { pattern: "x", filesOnly: true }),
+      /Unknown argument for sc-search-plan: filesOnly/,
+    );
+    await assert.rejects(
+      () => callTool("sc-search-plan", { pattern: "x", mode: "search" }),
+      /Unknown argument for sc-search-plan: mode/,
+    );
+    await assert.rejects(
+      () => callTool("sc-snippets", { path: "sample.txt" }),
+      /Unknown argument for sc-snippets: path/,
+    );
+    await assert.rejects(
+      () => callTool("sc-snippets", { paths: ["sample.txt"] }),
+      /Unknown argument for sc-snippets: paths/,
+    );
+    await assert.rejects(
+      () => callTool("sc-snippets", { spec: "sample.txt:1-1", toLine: 1 }),
+      /Unknown argument for sc-snippets: toLine/,
+    );
+    await assert.rejects(
+      () => callTool("sc-process", { mode: "restart" }),
+      /process mode must be one of: start, list, status, logs, stop/,
     );
     await assert.rejects(
       () => callTool("sc-read", { paths: [] }),

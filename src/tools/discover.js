@@ -7,17 +7,31 @@ import { recordStats } from "../stats.js";
 import { assertPathAllowed, formatTruncationReason, invalidParams, omission, relativePath, savingsMeta, toolTextResult, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
 
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", ".pi", ".opencode", ".cache"]);
+const INVENTORY_SKIP_DIRS = new Set([
+  ...SKIP_DIRS,
+  ".next",
+  ".nuxt",
+  ".svelte-kit",
+  ".turbo",
+  ".vite",
+  "out",
+  "target",
+  "tmp",
+  "temp",
+  "__pycache__",
+]);
 const GIT_CHECK_IGNORE_CHUNK_SIZE = 100;
 
 export async function discoverTool(args) {
   const { mode = "summary" } = args ?? {};
-  if (!["summary", "files", "tree", "outline"].includes(mode)) {
-    invalidParams("discover mode must be \"summary\", \"files\", \"tree\", or \"outline\"");
+  if (!["summary", "files", "tree", "outline", "inventory"].includes(mode)) {
+    invalidParams("discover mode must be \"summary\", \"files\", \"tree\", \"outline\", or \"inventory\"");
   }
 
   if (mode === "summary") return await summaryMode(args);
   if (mode === "files") return await filesMode(args);
   if (mode === "tree") return await treeMode(args);
+  if (mode === "inventory") return await inventoryMode(args);
   return await outlineMode(args);
 }
 
@@ -116,6 +130,184 @@ async function walkFiles(root, current, state) {
       if (!state.matcher || state.matcher.test(file)) state.files.push(file);
     }
   }
+}
+
+async function inventoryMode(args) {
+  const { path: inputPath = ".", include, exclude, maxDepth = 5, maxFiles = 500, maxLines = MAX_LINES, maxBytes = DEFAULT_BYTES } = args ?? {};
+  if (typeof inputPath !== "string" || inputPath.trim() === "") invalidParams("discover path must be a non-empty string when provided");
+  if (include !== undefined && typeof include !== "string") invalidParams("discover include must be a string when provided");
+  if (exclude !== undefined && typeof exclude !== "string") invalidParams("discover exclude must be a string when provided");
+  const depthLimit = validateInteger(maxDepth, "discover maxDepth", 1, 10);
+  const fileLimit = validateInteger(maxFiles, "discover maxFiles", 1, 5000);
+  const lineLimit = validateInteger(maxLines, "discover maxLines", 10, 500);
+  const byteLimit = validateInteger(maxBytes, "discover maxBytes", 1024, MAX_BYTES);
+  await assertPathAllowed(inputPath, "discover");
+
+  const includeMatcher = compileInventoryPattern(include, "include");
+  const excludeMatcher = compileInventoryPattern(exclude, "exclude");
+  const started = Date.now();
+  const root = path.resolve(inputPath);
+  const state = {
+    files: [],
+    byTopLevel: new Map(),
+    byExtension: new Map(),
+    scannedFiles: 0,
+    skippedDirs: new Set(),
+    depthLimited: false,
+    limited: false,
+    limit: fileLimit + 1,
+    includeMatcher,
+    excludeMatcher,
+  };
+
+  const stat = await fs.promises.stat(root);
+  if (stat.isFile()) {
+    addInventoryFile(path.dirname(root), root, state);
+  } else {
+    await walkInventory(root, root, 0, depthLimit, state);
+  }
+
+  const shownFiles = state.files.slice(0, fileLimit);
+  const totalKnown = !state.limited;
+  const lines = [
+    `Root: ${relativePath(root)}`,
+    `Files: ${totalKnown ? state.files.length : `${shownFiles.length}+`} matched${state.scannedFiles !== state.files.length ? ` (${state.scannedFiles} scanned)` : ""}`,
+  ];
+
+  if (state.skippedDirs.size > 0) lines.push(`Default exclusions skipped: ${[...state.skippedDirs].sort().join(", ")}`);
+  lines.push("", "Top-level directories:", ...formatCountMap(state.byTopLevel, 12));
+  lines.push("", "Extensions:", ...formatCountMap(state.byExtension, 12));
+  lines.push("", "Sample files:", ...(shownFiles.length > 0 ? shownFiles.map((file) => `- ${file}`) : ["(no files)"]));
+  if (state.limited) lines.push(omission("files"));
+
+  const output = lines.join("\n");
+  const formatted = formatOutput(output, lineLimit, byteLimit);
+  const truncated = state.limited || state.depthLimited || formatted.truncated;
+  const meta = withResponseMeta({
+    mode: "inventory",
+    root,
+    relativeRoot: relativePath(root),
+    totalFiles: totalKnown ? state.files.length : undefined,
+    totalFilesKnown: totalKnown,
+    shownFiles: shownFiles.length,
+    scannedFiles: state.scannedFiles,
+    countsPartial: !totalKnown,
+    topLevelCounts: Object.fromEntries(state.byTopLevel),
+    extensionCounts: Object.fromEntries(state.byExtension),
+    skippedDirs: [...state.skippedDirs].sort(),
+    depthLimited: state.depthLimited,
+    include,
+    exclude,
+    totalLines: formatted.totalLines,
+    totalBytes: formatted.totalBytes,
+    ...savingsMeta(formatted),
+    truncated,
+    ...truncationMeta(truncated, inventoryTruncationReason(state, formatted, lineLimit, byteLimit), inventoryTruncationHint(state, formatted)),
+    empty: state.files.length === 0,
+    emptyReason: state.files.length === 0 ? "no_files" : undefined,
+    durationMs: Date.now() - started,
+  });
+  await recordStats("discover", meta);
+
+  return toolTextResult(formatted.text, meta, byteLimit);
+}
+
+function compileInventoryPattern(pattern, label) {
+  try {
+    return pattern ? new RegExp(pattern) : undefined;
+  } catch {
+    invalidParams(`discover ${label} must be a valid regular expression`);
+  }
+}
+
+async function walkInventory(root, current, depth, maxDepth, state) {
+  if (state.files.length >= state.limit) {
+    state.limited = true;
+    return;
+  }
+  if (depth >= maxDepth) {
+    if (await hasInventoryChildren(current)) state.depthLimited = true;
+    return;
+  }
+
+  const entries = await fs.promises.readdir(current, { withFileTypes: true });
+  entries.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    if (state.files.length >= state.limit) {
+      state.limited = true;
+      return;
+    }
+    const entryPath = path.join(current, entry.name);
+    if (entry.isDirectory() && INVENTORY_SKIP_DIRS.has(entry.name)) {
+      state.skippedDirs.add(entry.name);
+      continue;
+    }
+    if (entry.isDirectory() && isInventoryExcludedDirectory(root, entryPath, state.excludeMatcher)) continue;
+
+    if (entry.isDirectory()) await walkInventory(root, entryPath, depth + 1, maxDepth, state);
+    else if (entry.isFile()) addInventoryFile(root, entryPath, state);
+  }
+}
+
+function isInventoryExcludedDirectory(root, directoryPath, excludeMatcher) {
+  if (!excludeMatcher) return false;
+  const relative = path.relative(root, directoryPath).replaceAll(path.sep, "/");
+  return excludeMatcher.test(relative) || excludeMatcher.test(`${relative}/`);
+}
+
+function addInventoryFile(root, filePath, state) {
+  const relative = path.relative(root, filePath).replaceAll(path.sep, "/") || path.basename(filePath);
+  if (state.excludeMatcher?.test(relative)) return;
+  state.scannedFiles++;
+  if (state.includeMatcher && !state.includeMatcher.test(relative)) return;
+  state.files.push(relative);
+  incrementCount(state.byTopLevel, topLevelFor(relative));
+  incrementCount(state.byExtension, extensionFor(relative));
+  if (state.files.length >= state.limit) state.limited = true;
+}
+
+function topLevelFor(file) {
+  const [first, ...rest] = file.split("/");
+  return rest.length === 0 ? "." : first;
+}
+
+function extensionFor(file) {
+  const extension = path.extname(file).toLowerCase();
+  return extension || "[none]";
+}
+
+function incrementCount(map, key) {
+  map.set(key, (map.get(key) ?? 0) + 1);
+}
+
+function formatCountMap(map, limit) {
+  const entries = [...map.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  if (entries.length === 0) return ["(none)"];
+  const lines = entries.slice(0, limit).map(([name, count]) => `- ${name}: ${count}`);
+  if (entries.length > limit) lines.push(omission("groups", entries.length - limit));
+  return lines;
+}
+
+async function hasInventoryChildren(directory) {
+  try {
+    const entries = await fs.promises.readdir(directory, { withFileTypes: true });
+    return entries.some((entry) => entry.isFile() || (entry.isDirectory() && !INVENTORY_SKIP_DIRS.has(entry.name)));
+  } catch {
+    return false;
+  }
+}
+
+function inventoryTruncationReason(state, formatted, maxLines, maxBytes) {
+  if (state.limited) return "max_files";
+  if (state.depthLimited) return "depth_limit";
+  return formatTruncationReason(formatted, maxLines, maxBytes);
+}
+
+function inventoryTruncationHint(state, formatted) {
+  if (state.limited) return "Increase maxFiles or narrow include/exclude/path.";
+  if (state.depthLimited) return "Increase maxDepth.";
+  if (formatted.truncated) return "Increase maxLines/maxBytes.";
+  return undefined;
 }
 
 async function treeMode(args) {

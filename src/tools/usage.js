@@ -5,8 +5,9 @@ import { usageReport } from "../usage.js";
 import { formatTruncationReason, invalidParams, responseMeta, savingsMeta, toolTextResult, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
 
 export async function usageTool(args) {
-  const { mode = "stats", maxEvents = 1000, maxLines = MAX_LINES, maxBytes = DEFAULT_BYTES } = args ?? {};
+  const { mode = "stats", maxEvents = 1000, project, maxLines = MAX_LINES, maxBytes = DEFAULT_BYTES } = args ?? {};
   if (mode !== "stats" && mode !== "report" && mode !== "guidance") invalidParams("usage mode must be \"stats\", \"report\", or \"guidance\"");
+  if (project !== undefined && typeof project !== "string") invalidParams("usage project must be a string");
 
   const lineLimit = validateInteger(maxLines, "usage maxLines", 10, 500);
   const byteLimit = validateInteger(maxBytes, "usage maxBytes", 1024, MAX_BYTES);
@@ -14,7 +15,7 @@ export async function usageTool(args) {
 
   const eventLimit = validateInteger(maxEvents, "usage maxEvents", 1, 10000);
   const started = Date.now();
-  const report = await usageReport({ maxEvents: eventLimit });
+  const report = await usageReport({ maxEvents: eventLimit, project });
   const text = mode === "guidance" ? formatGuidance(report.meta) : report.text;
   const formatted = formatOutput(text, lineLimit, byteLimit);
   const meta = withResponseMeta({
@@ -38,6 +39,7 @@ function formatGuidance(report) {
       `Log file: ${report.logFile}`,
     ];
     if (report.ignoredProject) lines.push("Current working directory is a markerless temp directory; usage is ignored.");
+    else if (report.eventsRead > 0) lines.push("No usage events found for this project in the current window. Try increasing maxEvents or use project:\"all\" to inspect all logged projects.");
     else lines.push("No usage events found yet.");
     return lines.join("\n");
   }
@@ -48,6 +50,11 @@ function formatGuidance(report) {
     `Truncated calls: ${report.truncatedCalls}`,
     `Failed calls: ${report.failedCalls}`,
   ];
+
+  if (report.allProjects && report.projectOverview.length > 0) {
+    lines.push("", "Project overview:");
+    for (const summary of report.projectOverview.slice(0, 10)) lines.push(`${summary.name}: ${summary.calls} calls, ${summary.truncated} truncated, ${summary.failed} failed`);
+  }
 
   lines.push("", "Recommended tools/modes:");
   if (report.recommendations.length > 0) {
@@ -68,9 +75,26 @@ function formatGuidance(report) {
     }
   }
 
+  if (report.topReturnedByteCalls.length > 0) {
+    lines.push("", "Top returned-byte calls:");
+    for (const call of report.topReturnedByteCalls.slice(0, 5)) lines.push(`${displayToolName(call.tool)}: ${formatBytes(call.returnedBytes)} returned${call.truncated ? ", truncated" : ""}`);
+  }
+
+  if (report.topTruncationContributors.length > 0) {
+    lines.push("", "Top truncation contributors:");
+    for (const summary of report.topTruncationContributors.slice(0, 5)) lines.push(`${displayToolName(summary.name)}: ${summary.truncated} truncated, ${formatBytes(summary.returnedBytes)} returned`);
+  }
+
+  if (report.failureSummaries.length > 0) {
+    lines.push("", "Failures by tool/exitCode/errorCode:");
+    for (const failure of report.failureSummaries.slice(0, 10)) lines.push(`${displayToolName(failure.tool)} exitCode=${failure.exitCode} errorCode=${failure.errorCode}: ${failure.calls} failed`);
+  }
+
   lines.push("", "Practical guidance:");
   lines.push("Use sc-diff mode=history instead of raw git log for compact commit history.");
+  lines.push("Use sc-logs for tests, builds, lints, typechecks, and verbose diagnostic output.");
   lines.push("Use sc-read path with fromLine/toLine for targeted ranges; use paths for additional non-ranged files.");
+  lines.push("If sc-search or grep-like searches fail with exitCode 2, use literal:true for plain strings or validate regex syntax.");
   lines.push("When _meta.truncated or _meta.response.truncated is true, retry with a narrower path/range/query before using raw shell output.");
 
   return lines.join("\n");
@@ -78,6 +102,12 @@ function formatGuidance(report) {
 
 function displayToolName(toolName) {
   return typeof toolName === "string" && !toolName.startsWith("sc-") ? `sc-${toolName}` : toolName;
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 async function statsResult(maxLines, maxBytes) {
