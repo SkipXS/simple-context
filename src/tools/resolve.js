@@ -100,12 +100,13 @@ async function existingPathResult(candidate, root) {
   }
 
   const realPath = await fs.promises.realpath(candidate).catch(() => path.resolve(candidate));
+  const realRoot = await fs.promises.realpath(root).catch(() => path.resolve(root));
   return {
     path: path.resolve(candidate),
     realPath,
     root,
     type: stat.isDirectory() ? "dir" : stat.isFile() ? "file" : "other",
-    projectRelativePath: relativePath(realPath),
+    projectRelativePath: relativePath(realPath, realRoot),
   };
 }
 

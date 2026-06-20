@@ -34,8 +34,8 @@ export async function envTool(args) {
 
   const started = Date.now();
   const cwd = process.cwd();
-  const projectRoot = projectKeyForPath(cwd) ?? cwd;
   const packageInfo = await readPackageInfo(cwd);
+  const projectRoot = packageInfo?.root ?? displayPath(projectKeyForPath(cwd) ?? cwd);
   const pathEntries = pathEnvEntries();
   const toolResults = await Promise.all(requestedTools.map((tool) => inspectTool(tool, pathEntries)));
 
@@ -165,7 +165,8 @@ async function readPackageInfo(startDir) {
     const packageJson = JSON.parse(await fs.promises.readFile(packagePath, "utf8"));
     const root = path.dirname(packagePath);
     return {
-      path: packagePath,
+      path: displayPath(packagePath),
+      root: displayPath(root),
       packageManager: typeof packageJson.packageManager === "string" ? packageJson.packageManager : undefined,
       packageManagers: await detectPackageManagers(root, packageJson),
       scripts: packageJson.scripts && typeof packageJson.scripts === "object" && !Array.isArray(packageJson.scripts)
@@ -173,7 +174,7 @@ async function readPackageInfo(startDir) {
         : [],
     };
   } catch {
-    return { path: packagePath, packageManagers: [], scripts: [], parseError: true };
+    return { path: displayPath(packagePath), root: displayPath(path.dirname(packagePath)), packageManagers: [], scripts: [], parseError: true };
   }
 }
 
@@ -208,6 +209,14 @@ async function detectPackageManagers(root, packageJson) {
     }
   }));
   return [...managers].sort();
+}
+
+function displayPath(filePath) {
+  if (process.platform !== "darwin" || typeof filePath !== "string") return filePath;
+  if (!os.tmpdir().startsWith("/var/")) return filePath;
+  if (filePath === "/private/var") return "/var";
+  const privateVarPrefix = "/private/var/";
+  return filePath.startsWith(privateVarPrefix) ? `/var/${filePath.slice(privateVarPrefix.length)}` : filePath;
 }
 
 function formatEnvText({ cwd, projectRoot, packageInfo, toolResults, includePath, pathEntries }) {
