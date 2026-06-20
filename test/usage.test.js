@@ -90,6 +90,8 @@ await describe("usage cross-project reports", async () => {
 
     const guidance = runUsageChild({ home: fixture.home, cwd: fixture.projectA, events: fixture.events, args: { mode: "guidance", project: "all" } });
     assert.match(guidance.text, /Usage guidance for all projects/);
+    assert.match(guidance.text, /Events analyzed: 6 \(6 across all projects, 6 read\)/);
+    assert.doesNotMatch(guidance.text, /6 for this project/);
     assert.match(guidance.text, /Project overview:/);
     assert.match(guidance.text, new RegExp(escapeRegExp(fixture.projectB)));
   });

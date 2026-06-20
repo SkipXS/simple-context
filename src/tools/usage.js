@@ -46,7 +46,9 @@ function formatGuidance(report) {
 
   const lines = [
     `Usage guidance for ${report.project}`,
-    `Events analyzed: ${report.eventsAnalyzed} (${report.projectEventsRead} for this project, ${report.eventsRead} read)`,
+    report.allProjects
+      ? `Events analyzed: ${report.eventsAnalyzed} (${report.projectEventsRead} across all projects, ${report.eventsRead} read)`
+      : `Events analyzed: ${report.eventsAnalyzed} (${report.projectEventsRead} for this project, ${report.eventsRead} read)`,
     `Truncated calls: ${report.truncatedCalls}`,
     `Failed calls: ${report.failedCalls}`,
   ];
