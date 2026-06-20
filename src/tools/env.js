@@ -5,7 +5,7 @@ import { COMMAND_SHELL_NAME, DEFAULT_BYTES, MAX_BYTES, MAX_LINES, projectKeyForP
 import { formatOutput } from "../output.js";
 import { runProcess } from "../process.js";
 import { recordStats } from "../stats.js";
-import { formatTruncationReason, invalidParams, savingsMeta, toolTextResult, truncationMeta, validateCommandPolicy, validateInteger, withResponseMeta } from "./shared.js";
+import { displayPath, formatTruncationReason, invalidParams, savingsMeta, toolTextResult, truncationMeta, validateCommandPolicy, validateInteger, withResponseMeta } from "./shared.js";
 
 export const DEFAULT_ENV_TOOLS = Object.freeze(["git", "node", "npm", "pnpm", "yarn", "python", "python3", "go", "ruby", "bundle", "rg"]);
 
@@ -209,14 +209,6 @@ async function detectPackageManagers(root, packageJson) {
     }
   }));
   return [...managers].sort();
-}
-
-function displayPath(filePath) {
-  if (process.platform !== "darwin" || typeof filePath !== "string") return filePath;
-  if (!os.tmpdir().startsWith("/var/")) return filePath;
-  if (filePath === "/private/var") return "/var";
-  const privateVarPrefix = "/private/var/";
-  return filePath.startsWith(privateVarPrefix) ? `/var/${filePath.slice(privateVarPrefix.length)}` : filePath;
 }
 
 function formatEnvText({ cwd, projectRoot, packageInfo, toolResults, includePath, pathEntries }) {

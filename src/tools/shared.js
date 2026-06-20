@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { COMMAND_ALLOWLIST, DISABLE_COMMAND_TOOLS, PATH_ROOTS } from "../constants.js";
 
@@ -126,6 +127,14 @@ async function realPathForPolicy(filePath) {
 function isInsidePath(candidate, root) {
   const relative = path.relative(root, candidate);
   return relative === "" || (relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+export function displayPath(filePath) {
+  if (process.platform !== "darwin" || typeof filePath !== "string") return filePath;
+  if (!os.tmpdir().startsWith("/var/")) return filePath;
+  if (filePath === "/private/var") return "/var";
+  const privateVarPrefix = "/private/var/";
+  return filePath.startsWith(privateVarPrefix) ? `/var/${filePath.slice(privateVarPrefix.length)}` : filePath;
 }
 
 export function relativePath(filePath, root = process.cwd()) {

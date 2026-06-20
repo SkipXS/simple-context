@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { DEFAULT_BYTES, MAX_BYTES, MAX_LINES, projectKey } from "../constants.js";
 import { formatOutput } from "../output.js";
 import { recordStats } from "../stats.js";
-import { assertPathAllowed, formatTruncationReason, invalidParams, relativePath, savingsMeta, toolTextResult, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
+import { assertPathAllowed, displayPath, formatTruncationReason, invalidParams, relativePath, savingsMeta, toolTextResult, truncationMeta, validateInteger, withResponseMeta } from "./shared.js";
 
 const DEFAULT_MAX_MATCHES = 10;
 const SKIP_DIRS = new Set([".git", "node_modules", ".pi", "dist", "build", "coverage", ".cache", ".next", ".nuxt", "out", "target", "tmp", "temp"]);
@@ -102,7 +102,7 @@ async function existingPathResult(candidate, root) {
   const realPath = await fs.promises.realpath(candidate).catch(() => path.resolve(candidate));
   const realRoot = await fs.promises.realpath(root).catch(() => path.resolve(root));
   return {
-    path: path.resolve(candidate),
+    path: displayPath(path.resolve(candidate)),
     realPath,
     root,
     type: stat.isDirectory() ? "dir" : stat.isFile() ? "file" : "other",
