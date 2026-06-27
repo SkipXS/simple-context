@@ -128,7 +128,7 @@ export const tools = {
     {
       name: "read",
       description:
-        "Read bounded UTF-8 file previews. Use path/fromLine/toLine, ranges, or compact spec for snippet packs.",
+        "Read bounded UTF-8 previews: path/fromLine/toLine or packs. If pack truncates, split/fewer/narrower ranges/files.",
       inputSchema: {
         type: "object",
         properties: {
@@ -158,7 +158,7 @@ export const tools = {
             description: "Snippet ranges, max 20: { path, fromLine?, toLine? }.",
           },
           maxLines: maxLinesProperty("Content line cap; per-file in paths/ranges mode."),
-          lineNumbers: { type: "boolean", description: "Number lines. path/paths default false; ranges default true unless set false." },
+          lineNumbers: { type: "boolean", description: "Number lines. path/paths default false; ranges default true." },
           maxBytes: maxBytesProperty("Byte cap; per-file in paths/ranges mode."),
           fromLine: {
             type: "integer",
@@ -185,7 +185,7 @@ export const tools = {
     {
       name: "snippets",
       description:
-        "Read focused line-range snippets from compact spec or range objects.",
+        "Read focused line-range snippets from spec/ranges. If truncated, split it or request fewer/narrower ranges.",
       inputSchema: {
         type: "object",
         properties: {
@@ -207,7 +207,7 @@ export const tools = {
             },
             description: "Focused ranges, max 20; each item needs fromLine or toLine.",
           },
-          lineNumbers: { type: "boolean", description: "Number snippet lines. Default: true unless set false." },
+          lineNumbers: { type: "boolean", description: "Number lines. Default: true unless false." },
           maxLinesPerFile: maxLinesProperty("Lines per snippet."),
           maxBytesPerFile: maxBytesProperty("Bytes per snippet."),
           maxTotalBytes: maxBytesProperty("Total snippet-pack byte cap."),
@@ -223,19 +223,19 @@ export const tools = {
     {
       name: "search",
       description:
-        "Search local files with bounded text or ast-grep output.",
+        "Text regex by default; literal:true for strings/code/metachars. Broad: plan or filesOnly:true first, then sc-snippets.",
       inputSchema: {
         type: "object",
         properties: {
           engine: { type: "string", enum: ["text", "ast"], description: "Default: text; ast uses ast-grep." },
-          pattern: { type: "string", description: "Regex for text unless literal=true; ast-grep pattern for ast." },
+          pattern: { type: "string", description: "Regex for text by default; use literal:true for strings/code snippets/metachars; ast uses ast-grep." },
           path: { type: "string", description: "Search path. Default: ." },
           include: { type: "string", description: "Include glob, not regex, e.g. *.js." },
           language: { type: "string", description: "ast-grep language when not inferred." },
-          mode: { type: "string", enum: ["search", "plan"], description: "Text mode: search returns matches; plan summarizes files/counts/suggestions." },
+          mode: { type: "string", enum: ["search", "plan"], description: "Text mode: search returns matches; plan summarizes broad searches before sc-snippets." },
           contextLines: { type: "integer", minimum: 0, maximum: 10, default: 0, description: "Context lines. Ignored when filesOnly=true. Default: 0." },
-          literal: { type: "boolean", description: "Text only: treat pattern as fixed string. Default: false." },
-          filesOnly: { type: "boolean", description: "Text only: return matching file paths. Default: false." },
+          literal: { type: "boolean", description: "Text only: fixed string for plain strings/code snippets/metachars. Default: false." },
+          filesOnly: { type: "boolean", description: "Text only: matching paths for broad searches before sc-snippets. Default: false." },
           maxMatches: {
             type: "integer",
             minimum: 1,
@@ -252,14 +252,14 @@ export const tools = {
     {
       name: "search-plan",
       description:
-        "Plan a bounded text search with matching files, counts, and next-step suggestions.",
+        "Plan text search before sc-snippets. Pattern is regex by default; use literal:true for strings/code/metachars.",
       inputSchema: {
         type: "object",
         properties: {
-          pattern: { type: "string", description: "Regex for text unless literal=true." },
+          pattern: { type: "string", description: "Text regex by default; use literal:true for strings/code snippets/metachars." },
           path: { type: "string", description: "Search path. Default: ." },
           include: { type: "string", description: "Include glob, not regex, e.g. *.js." },
-          literal: { type: "boolean", description: "Treat pattern as a fixed string. Default: false." },
+          literal: { type: "boolean", description: "Fixed string for plain strings/code snippets/metachars. Default: false." },
           contextLines: { type: "integer", minimum: 0, maximum: 10, default: 0, description: "Context hint for follow-up search. Default: 0." },
           maxMatches: {
             type: "integer",
@@ -317,7 +317,7 @@ export const tools = {
         properties: {
           url: { type: "string", description: "HTTP(S) URL; localhost/private reachable." },
           force: { type: "boolean", description: "Skip cache read and refresh. Default: false." },
-          cache: { type: "boolean", description: "Override fetch cache use. Default: public text only; private literal hosts bypass unless opted in." },
+          cache: { type: "boolean", description: "Override fetch cache. Default: public text only; private hosts bypass unless opted in." },
           maxLines: maxLinesProperty(),
           maxBytes: maxBytesProperty(),
         },

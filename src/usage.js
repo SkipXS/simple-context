@@ -203,6 +203,7 @@ function summarizeUsage(entries, project, eventsRead, projectEventsRead, options
     projectOverview: sortedSummaries(byProject),
     topReturnedByteCalls: topReturnedByteCalls(entries),
     topTruncationContributors: [...toolSummaries].sort((a, b) => b.truncated - a.truncated || b.returnedBytes - a.returnedBytes).filter((summary) => summary.truncated > 0).slice(0, 10),
+    topTruncationPatterns: topTruncationPatterns(entries),
     failureSummaries,
     byTool: toolSummaries,
     byCommandKind: commandSummaries,
@@ -266,6 +267,26 @@ function topReturnedByteCalls(entries) {
     }));
 }
 
+function topTruncationPatterns(entries) {
+  const patterns = new Map();
+  for (const entry of entries) {
+    if (!entry.truncated) continue;
+    const args = entry.args && typeof entry.args === "object" ? entry.args : {};
+    const details = [];
+    for (const key of ["mode", "engine", "filesOnly", "literal", "staged", "stat", "hasSpec", "hasFromLine", "hasToLine"]) {
+      if (args[key] !== undefined) details.push(`${key}=${args[key]}`);
+    }
+    const label = details.length > 0 ? `${displayToolName(entry.tool)} (${details.join(", ")})` : displayToolName(entry.tool);
+    const summary = patterns.get(label) ?? { name: label, calls: 0, returnedBytes: 0 };
+    summary.calls++;
+    summary.returnedBytes += numberOrZero(entry.returnedBytes);
+    patterns.set(label, summary);
+  }
+  return [...patterns.values()]
+    .sort((a, b) => b.calls - a.calls || b.returnedBytes - a.returnedBytes)
+    .slice(0, 10);
+}
+
 function recommendTools(commandSummaries, toolSummaries, failureSummaries = []) {
   const recommendations = [];
   const commandMap = new Map(commandSummaries.map((summary) => [summary.name, summary]));
@@ -279,9 +300,19 @@ function recommendTools(commandSummaries, toolSummaries, failureSummaries = []) 
   addRecommendation(recommendations, commandMap.get("file-read"), "sc-read path/fromLine/paths", "Use targeted ranges for one file and paths for additional non-ranged file previews.");
 
   const search = commandMap.get("search-discovery");
-  const searchTool = toolMap.get("search");
+  const searchTool = toolMap.get("search") ?? toolMap.get("sc-search");
   if (search && (!searchTool || search.calls > searchTool.calls)) {
     addRecommendation(recommendations, search, "sc-search", "Use bounded search results with contextLines when surrounding lines are useful.");
+  }
+  if (searchTool?.truncated > 0 || search?.truncated > 1) {
+    const evidenceSummary = searchTool?.truncated > 0 ? searchTool : search;
+    recommendations.push({
+      toolName: "sc-search-plan or sc-search filesOnly:true",
+      reason: "For broad/high-truncation searches, list matching files first, then use sc-snippets on selected ranges.",
+      evidence: `${evidenceSummary.calls} search calls, ${evidenceSummary.truncated} truncated`,
+      calls: evidenceSummary.calls,
+      truncated: evidenceSummary.truncated,
+    });
   }
 
   const searchRegexFailures = failureSummaries.find((summary) => (summary.tool === "search" || summary.tool === "sc-search" || summary.commandKind === "search-discovery") && summary.exitCode === 2);
@@ -355,6 +386,11 @@ function formatUsageReport(report) {
     for (const summary of report.topTruncationContributors.slice(0, 5)) lines.push(`${displayToolName(summary.name)}: ${summary.truncated} truncated, ${formatBytes(summary.returnedBytes)} returned`);
   }
 
+  if (report.topTruncationPatterns?.length > 0) {
+    lines.push("", "Truncation patterns:");
+    for (const pattern of report.topTruncationPatterns.slice(0, 5)) lines.push(`${pattern.name}: ${pattern.calls} truncated, ${formatBytes(pattern.returnedBytes)} returned`);
+  }
+
   if (report.failureSummaries.length > 0) {
     lines.push("", "Failures by tool/exitCode/errorCode:");
     for (const failure of report.failureSummaries.slice(0, 10)) lines.push(`${displayToolName(failure.tool)} exitCode=${failure.exitCode} errorCode=${failure.errorCode}: ${failure.calls} failed`);
@@ -384,23 +420,61 @@ function formatSummaryLine(summary) {
   return `${summary.name}: ${summary.calls} calls, ${summary.truncated} truncated, ${summary.failed} failed, saved ${formatBytes(summary.savedBytes)} (${summary.savedPercent}%), avg ${summary.avgDurationMs}ms`;
 }
 
-function summarizeArgs(args) {
+export function summarizeArgs(args) {
   if (!args || typeof args !== "object") return {};
   const summary = {};
   for (const [key, value] of Object.entries(args)) {
     if (key === "command") {
       summary.hasCommand = typeof value === "string" && value.length > 0;
     } else if (key === "paths") {
+      summary.pathsCount = Array.isArray(value) ? value.length : undefined;
       summary[key] = Array.isArray(value) ? `array:${value.length}` : typeof value;
-    } else if (["path", "url", "include", "pattern"].includes(key)) {
+    } else if (key === "ranges") {
+      summary.rangesCount = Array.isArray(value) ? value.length : undefined;
+      if (Array.isArray(value)) {
+        summary.hasFromLine = value.some((range) => Number.isFinite(range?.fromLine));
+        summary.hasToLine = value.some((range) => Number.isFinite(range?.toLine));
+      }
+    } else if (key === "spec") {
+      summary.hasSpec = typeof value === "string" && value.length > 0;
+      summary.specLengthBucket = lengthBucket(value);
+    } else if (key === "pattern") {
       summary[key] = typeof value;
-    } else if (["maxLines", "maxBytes", "maxLinesPerFile", "maxBytesPerFile", "maxTotalBytes", "maxMatches", "maxFiles", "maxHunks", "maxBlocks", "contextLines"].includes(key)) {
+      summary.patternLengthBucket = lengthBucket(value);
+    } else if (key === "include") {
+      summary[key] = typeof value;
+      summary.includePresent = typeof value === "string" && value.length > 0;
+    } else if (["path", "url"].includes(key)) {
+      summary[key] = typeof value;
+    } else if (key === "mode") {
+      summary.mode = safeCategory(value, ["stats", "report", "guidance", "search", "plan", "summary", "diff", "files", "status", "history", "overview", "precommit", "logs", "start", "stop", "list", "auto", "custom", "npm", "go", "python", "ruby", "tree", "inventory", "outline"]);
+    } else if (key === "engine") {
+      summary.engine = safeCategory(value, ["text", "ast"]);
+    } else if (key === "fromLine") {
+      summary.hasFromLine = Number.isFinite(value);
+    } else if (key === "toLine") {
+      summary.hasToLine = Number.isFinite(value);
+    } else if (["maxLines", "maxBytes", "maxLinesPerFile", "maxBytesPerFile", "maxTotalLines", "maxTotalBytes", "maxMatches", "maxCommits", "maxFiles", "maxHunks", "maxBlocks", "contextLines"].includes(key)) {
       summary[key] = numberOrUndefined(value);
     } else if (typeof value === "boolean") {
       summary[key] = value;
     }
   }
   return summary;
+}
+
+function lengthBucket(value) {
+  if (typeof value !== "string") return typeof value;
+  if (value.length === 0) return "empty";
+  if (value.length <= 20) return "short";
+  if (value.length <= 100) return "medium";
+  if (value.length <= 500) return "long";
+  return "very-long";
+}
+
+function safeCategory(value, allowed) {
+  if (typeof value !== "string") return typeof value;
+  return allowed.includes(value) ? value : "other";
 }
 
 export function classifyCommand(command) {

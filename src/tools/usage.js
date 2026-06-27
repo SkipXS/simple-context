@@ -87,6 +87,11 @@ function formatGuidance(report) {
     for (const summary of report.topTruncationContributors.slice(0, 5)) lines.push(`${displayToolName(summary.name)}: ${summary.truncated} truncated, ${formatBytes(summary.returnedBytes)} returned`);
   }
 
+  if (report.topTruncationPatterns?.length > 0) {
+    lines.push("", "Truncation patterns:");
+    for (const pattern of report.topTruncationPatterns.slice(0, 5)) lines.push(`${pattern.name}: ${pattern.calls} truncated, ${formatBytes(pattern.returnedBytes)} returned`);
+  }
+
   if (report.failureSummaries.length > 0) {
     lines.push("", "Failures by tool/exitCode/errorCode:");
     for (const failure of report.failureSummaries.slice(0, 10)) lines.push(`${displayToolName(failure.tool)} exitCode=${failure.exitCode} errorCode=${failure.errorCode}: ${failure.calls} failed`);
@@ -96,6 +101,7 @@ function formatGuidance(report) {
   lines.push("Use sc-diff mode=history instead of raw git log for compact commit history.");
   lines.push("Use sc-logs for tests, builds, lints, typechecks, and verbose diagnostic output.");
   lines.push("Use sc-read path with fromLine/toLine for targeted ranges; use paths for additional non-ranged files.");
+  lines.push("For broad searches, use sc-search-plan or sc-search filesOnly:true first, then sc-snippets on selected ranges.");
   lines.push("If sc-search or grep-like searches fail with exitCode 2, use literal:true for plain strings or validate regex syntax.");
   lines.push("When _meta.truncated or _meta.response.truncated is true, retry with a narrower path/range/query before using raw shell output.");
 

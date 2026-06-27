@@ -13,6 +13,8 @@ const MAX_AST_CONTEXT_DISPLAY_LINES = 12;
 const AST_CONTEXT_HEAD_LINES = 8;
 const AST_CONTEXT_TAIL_LINES = 3;
 const searchTruncationHint = "Increase maxMatches/maxLines/maxBytes or narrow pattern/path/include.";
+const MAX_ERROR_COMMAND_CHARS = 600;
+const MAX_ERROR_STDERR_CHARS = 1000;
 const AST_LANGUAGE_BY_EXTENSION = new Map([
   [".c", "c"],
   [".cc", "cpp"],
@@ -554,11 +556,11 @@ function searchPlanHeader({ pattern, searchPath, include, literal, shownFiles })
 
 function searchPlanSuggestions({ searchPath, include, literal, contextLines }) {
   const suggestions = ["Suggestions:"];
-  if (!literal) suggestions.push("- If this is a plain string, retry with literal:true to avoid regex interpretation.");
+  if (!literal) suggestions.push("- If this is a plain string, code snippet, or contains regex metacharacters, retry with literal:true to avoid regex interpretation.");
   if (!searchPath || searchPath === ".") suggestions.push("- Narrow path to a subdirectory when you know where matches should be.");
   if (!include) suggestions.push("- Add include such as \"*.js\" or \"src/**/*.ts\" to reduce searched files.");
-  if (contextLines === 0) suggestions.push("- Use contextLines when you need surrounding lines, or use sc-search with filesOnly:true when filenames are enough.");
-  else suggestions.push("- Lower contextLines or maxMatches if normal search output would be too large.");
+  if (contextLines === 0) suggestions.push("- Broad workflow: use this plan or sc-search filesOnly:true first, then sc-snippets on selected file ranges.");
+  else suggestions.push("- Broad workflow: lower contextLines/maxMatches or use sc-search filesOnly:true first, then sc-snippets on selected file ranges.");
   suggestions.push("- Use maxMatches/maxLines/maxBytes to adjust this bounded summary.");
   return suggestions;
 }
@@ -597,8 +599,12 @@ async function noMatchPlan(rg, durationMs, { pattern, searchPath, include, liter
 
 function rgCommandError(rgArgs, result) {
   if (result.code === 2) {
-    const stderr = result.stderr ? `\n${result.stderr.trim()}` : "";
-    const error = new Error(`Command failed: rg ${rgArgs.join(" ")} (exited with code 2). ripgrep reported a regex/search error. If your pattern is a plain string, retry with literal:true; otherwise check regex syntax and escaping.${stderr}`);
+    const command = compactForErrorMessage(rgArgs.join(" "), MAX_ERROR_COMMAND_CHARS);
+    const stderrText = result.stderr?.trim() ?? "";
+    const stderr = stderrText
+      ? `\nripgrep stderr${stderrText.length > MAX_ERROR_STDERR_CHARS ? " (truncated)" : ""}:\n${compactForErrorMessage(stderrText, MAX_ERROR_STDERR_CHARS)}`
+      : "";
+    const error = new Error(`Command failed: rg ${command} (exited with code 2). ripgrep reported a regex/search error. If your pattern is a plain string, code snippet, or contains regex metacharacters, retry with literal:true; otherwise check regex syntax and escaping.${stderr}`);
     error.status = result.code;
     error.signal = result.signal;
     error.stdout = result.stdout;
@@ -608,6 +614,24 @@ function rgCommandError(rgArgs, result) {
     throw error;
   }
   commandError(`rg ${rgArgs.join(" ")}`, result.code, result.signal, result.stdout, result.stderr, result.timedOut, result.outputTooLarge);
+}
+
+function compactForErrorMessage(value, maxChars) {
+  const text = String(value);
+  if (text.length <= maxChars) return text;
+  let omitted = text.length - maxChars;
+  let marker = "";
+  let keep = 0;
+  for (;;) {
+    marker = `...[omitted ${omitted} chars]...`;
+    keep = Math.max(0, maxChars - marker.length);
+    const actualOmitted = text.length - keep;
+    if (actualOmitted === omitted) break;
+    omitted = actualOmitted;
+  }
+  const head = Math.ceil(keep / 2);
+  const tail = Math.floor(keep / 2);
+  return `${text.slice(0, head)}${marker}${text.slice(text.length - tail)}`;
 }
 
 async function searchFilesOnly(rg, pattern, searchPath, include, { literal, contextLines, maxMatches, maxLines, maxBytes }) {

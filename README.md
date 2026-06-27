@@ -30,6 +30,7 @@ Tool names exposed by `tools/list` are prefixed with `sc-` to avoid collisions w
 - Failing tests/builds: `sc-logs` on the test command → `sc-read` with `fromLine`/`toLine` for implicated files.
 - Reviewing changes: `sc-diff` first → `sc-read` only touched or referenced files.
 - Huge file/log: `sc-search` for anchors first → narrow `sc-read` ranges instead of broad reads.
+- Broad search: `sc-search-plan` or `sc-search {"filesOnly":true}` first → `sc-snippets` on selected file ranges.
 - Truncated output: inspect `_meta.truncation.retryHint`; narrow path/query/range before raising limits.
 
 ## Security Model
@@ -161,7 +162,7 @@ Reads only focused line-range snippets. Use it when you already have `file:line`
 
 ### `sc-search`
 
-Searches local files with ripgrep by default and returns bounded `file:line:match` output. Pass `contextLines` when you need small surrounding context windows. Set `literal:true` to treat the text pattern as a fixed string (`rg --fixed-strings`) so regex metacharacters are not interpreted. Set `filesOnly:true` to return only matching file paths (`rg --files-with-matches`); this mode is capped by `maxMatches`, `maxLines`, and `maxBytes`, and `contextLines` does not add surrounding content. Override with `maxMatches`, `maxLines`, or `maxBytes` per call. `include` is a ripgrep glob, not a regex. When matches or files are limited, the final line says how many were shown and that more exist.
+Searches local files with ripgrep by default and returns bounded `file:line:match` output. Text `pattern` is a regex by default. Pass `contextLines` when you need small surrounding context windows. Set `literal:true` to treat the text pattern as a fixed string (`rg --fixed-strings`) for plain strings, code snippets, or regex metacharacters. Set `filesOnly:true` to return only matching file paths (`rg --files-with-matches`), which is useful as the first step for broad searches before calling `sc-snippets` on selected file ranges; this mode is capped by `maxMatches`, `maxLines`, and `maxBytes`, and `contextLines` does not add surrounding content. Override with `maxMatches`, `maxLines`, or `maxBytes` per call. `include` is a ripgrep glob, not a regex. When matches or files are limited, the final line says how many were shown and that more exist.
 Relative search paths are resolved from the MCP server's `process.cwd()`.
 
 ```json
@@ -202,7 +203,7 @@ simple-context discovers `sg` or `ast-grep` on `PATH`, or use `SIMPLE_CONTEXT_AS
 
 ### `sc-search-plan`
 
-Plans a bounded text search before you ask for matching lines. It reports matching files, counts, and next-step suggestions so agents can pick narrower `sc-search` or `sc-snippets` calls. It is text-only: no `engine`, `language`, `filesOnly`, or `mode` arguments.
+Plans a bounded text search before you ask for matching lines. Text `pattern` is a regex by default; use `literal:true` for plain strings, code snippets, or regex metacharacters. It reports matching files, counts, and next-step suggestions so agents can pick narrower `sc-search` calls or read selected ranges with `sc-snippets`. It is text-only: no `engine`, `language`, `filesOnly`, or `mode` arguments.
 
 ```json
 { "pattern": "TODO|FIXME", "path": "src", "include": "*.js", "maxMatches": 100, "maxLines": 120 }
@@ -381,7 +382,7 @@ Each tool response reports compact savings stats in `_meta.response`: `totalByte
 
 Aggregate stats are stored globally in `~/.simple-context/stats.json`. They contain only numeric counters grouped by project path and tool name, not commands, file paths, URLs, or content.
 
-The published `tools/list` schemas preserve strict `additionalProperties: false` validation and describe high-risk semantics: `sc-run`, `sc-logs`, `sc-validate`, `sc-process`, and `sc-env` execute local commands, `sc-process` `start`/`stop` mutate managed processes while `list`/`status`/`logs` do not start/stop processes or mutate the project/source tree, `sc-env` probes `PATH` tools with version commands, `sc-search` uses regex patterns for text and ast-grep patterns for AST mode, `sc-search.include` is a glob while `sc-discover.include` is a regex, `sc-fetch` is HTTP(S) by default but can reach localhost/private networks, and `sc-diff` files/summary/status exclude untracked files unless staged.
+The published `tools/list` schemas preserve strict `additionalProperties: false` validation and describe high-risk semantics: `sc-run`, `sc-logs`, `sc-validate`, `sc-process`, and `sc-env` execute local commands, `sc-process` `start`/`stop` mutate managed processes while `list`/`status`/`logs` do not start/stop processes or mutate the project/source tree, `sc-env` probes `PATH` tools with version commands, `sc-search` uses regex patterns for text unless `literal:true` is set and ast-grep patterns for AST mode, `sc-search.include` is a glob while `sc-discover.include` is a regex, `sc-fetch` is HTTP(S) by default but can reach localhost/private networks, and `sc-diff` files/summary/status exclude untracked files unless staged.
 
 The server also injects short MCP startup instructions that tell the LLM to prefer these bounded tools for shell output, verbose diagnostic commands/logs, file previews, local search, repo discovery, readable web pages, git previews, and usage guidance. In particular, the instructions steer tests/builds/lints/typechecks/publishes/CI/logs from backend, web, Android, iOS, and infrastructure ecosystems toward `sc-logs`, reserving `sc-run` for short commands where compact stdout is the desired result. Native shell, read, fetch, or diff tools remain appropriate when complete output, exact stderr/exit behavior, interactivity, raw HTML, or unsupported behavior is specifically needed. If `_meta.truncated` is true, use `_meta.truncation.reason/retryHint` and retry with a narrower query/range/path or higher `maxLines`/`maxBytes` before falling back to native tools.
 

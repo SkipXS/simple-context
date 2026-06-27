@@ -277,7 +277,7 @@ async function assertToolOutputGoldens() {
     );
     assert.match(normalizedReadMany, /^\[truncated: multi-file total limit;/m);
     assert.doesNotMatch(normalizedReadMany, /raise maxLines\/maxBytes/);
-    assert.match(normalizedReadMany, /\[retry: raise maxTotalLines\/maxTotalBytes or per-file limits\]/);
+    assert.match(normalizedReadMany, /\[retry: Split this pack; request fewer files or narrower ranges; .*maxTotalLines\/maxTotalBytes/);
     assert.equal(truncatedReadMany._meta.truncated, true);
   } finally {
     if (tempDir) await rm(tempDir, { recursive: true, force: true });

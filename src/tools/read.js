@@ -134,7 +134,7 @@ export async function readManyTool(args, toolName = "read") {
     totalBytes,
     ...contextSavings,
     truncated,
-    ...truncationMeta(truncated, readManyTruncationReason(formatted, totalLineLimit, totalLimit, results), "Increase maxTotalLines/maxTotalBytes or per-file limits."),
+    ...truncationMeta(truncated, readManyTruncationReason(formatted, totalLineLimit, totalLimit, results), readPackTruncationHint("file")),
     files: results.map(readManyFileMeta),
   });
   await recordStats(toolName, meta);
@@ -204,7 +204,7 @@ export async function readRangesTool(args, toolName = "read") {
     totalBytes,
     ...contextSavings,
     truncated,
-    ...truncationMeta(truncated, readManyTruncationReason(formatted, totalLineLimit, totalLimit, results), "Increase maxTotalLines/maxTotalBytes or per-snippet limits."),
+    ...truncationMeta(truncated, readManyTruncationReason(formatted, totalLineLimit, totalLimit, results), readPackTruncationHint(toolName === "snippets" ? "snippet" : "range")),
     ranges: results.map(readManyFileMeta),
   });
   await recordStats(toolName, meta);
@@ -274,7 +274,7 @@ async function readFilePreview(args, toolName) {
 
   const resolved = path.resolve(filePath);
   await assertPathAllowed(resolved, toolName);
-  const stat = await fs.promises.stat(resolved);
+  const stat = await statReadableFile(resolved, filePath, toolName);
   if (!stat.isFile()) {
     const error = new Error(`Not a file: ${filePath}`);
     error.code = -32602;
@@ -361,6 +361,31 @@ function readTruncationReason({ formatted, lineLimit, byteLimit, limited, rangeM
 
 function readTruncationHint({ rangeMode }) {
   return rangeMode ? "Narrow fromLine/toLine or increase maxLines/maxBytes." : "Increase maxLines/maxBytes or read a smaller file.";
+}
+
+function readPackTruncationHint(kind) {
+  const rangeText = kind === "file" ? "fewer files or narrower ranges" : "fewer or narrower ranges";
+  const perItemText = kind === "snippet" ? "per-snippet" : "per-file";
+  return `Split this pack; request ${rangeText}; lower ${perItemText} caps (maxLinesPerFile/maxBytesPerFile) to fit more sections, or raise maxTotalLines/maxTotalBytes for a larger response.`;
+}
+
+async function statReadableFile(resolved, originalPath, toolName) {
+  try {
+    return await fs.promises.stat(resolved);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    const pathText = boundedPathForError(originalPath);
+    const hint = "Hint: run sc-resolve with that path to find close candidates.";
+    const missing = new Error(`Path not found for sc-${toolName}: ${pathText}. ${hint}`);
+    missing.code = "ENOENT";
+    throw missing;
+  }
+}
+
+function boundedPathForError(filePath) {
+  const text = String(filePath);
+  if (text.length <= 160) return text;
+  return `${text.slice(0, 60)}…${text.slice(-80)}`;
 }
 
 function readRangeContentByteLimit(resolvedPath, range, maxBytes, lineNumbers) {

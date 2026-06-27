@@ -128,8 +128,8 @@ await describe("sc-search", async () => {
       assert.deepEqual(withoutDynamicSearchMeta(focused._meta), withoutDynamicSearchMeta(legacy._meta));
       assert.equal(focused._meta.mode, "plan");
       assert.match(focused.content[0].text, /Search plan: text "needle" in \.; include \*\.txt; 2 files summarized/);
-      assert.doesNotMatch(focused.content[0].text, /or filesOnly:true/);
-      assert.match(focused.content[0].text, /use sc-search with filesOnly:true/);
+      assert.match(focused.content[0].text, /Broad workflow: use this plan or sc-search filesOnly:true first/);
+      assert.match(focused.content[0].text, /then sc-snippets on selected file ranges/);
     });
   });
 
@@ -150,7 +150,7 @@ await describe("sc-search", async () => {
     });
   });
 
-  await it("adds literal guidance for regex errors", async () => {
+  await it("adds bounded literal guidance for regex errors", async () => {
     await withTempProject(async (dir) => {
       await seedSearchProject(dir);
 
@@ -159,8 +159,32 @@ await describe("sc-search", async () => {
         (error) => {
           assert.match(error.message, /regex\/search error/);
           assert.match(error.message, /literal:true/);
+          assert.match(error.message, /code snippet/);
           assert.match(error.message, /check regex syntax/);
+          assert.match(error.message, /ripgrep stderr/);
           assert.equal(error.status, 2);
+          return true;
+        },
+      );
+    });
+  });
+
+  await it("bounds regex error messages while preserving raw stderr metadata", async () => {
+    await withTempProject(async (dir) => {
+      await seedSearchProject(dir);
+      const longPattern = `[${"a".repeat(5_000)}`;
+
+      await assert.rejects(
+        callTool("sc-search-plan", { pattern: longPattern, path: ".", include: "*.txt" }),
+        (error) => {
+          assert.equal(error.status, 2);
+          assert.ok(error.message.length < 2500, `message length ${error.message.length}`);
+          assert.match(error.message, /literal:true/);
+          assert.match(error.message, /check regex syntax/);
+          assert.match(error.message, /omitted \d+ chars/);
+          assert.match(error.message, /ripgrep stderr \(truncated\)/);
+          assert.doesNotMatch(error.message, new RegExp(`a{${1000}}`));
+          assert.ok(error.stderr.length > 5_000, "raw stderr remains available for machine-readable metadata");
           return true;
         },
       );
@@ -409,7 +433,7 @@ let matcher;
 try {
   matcher = fixed ? undefined : new RegExp(pattern);
 } catch (error) {
-  console.error("regex parse error: " + error.message);
+  console.error("regex parse error for pattern " + pattern + ": " + error.message);
   process.exit(2);
 }
 

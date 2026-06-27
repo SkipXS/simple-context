@@ -78,6 +78,36 @@ await describe("sc-read validation feedback", async () => {
       );
     });
   });
+
+  await it("adds a bounded sc-resolve hint when sc-read cannot find a path", async () => {
+    const missing = path.join(os.tmpdir(), "scl-read-missing-nope.txt");
+
+    await assert.rejects(
+      () => callTool("sc-read", { path: missing }),
+      (error) => {
+        assert.equal(error.code, "ENOENT");
+        assert.match(error.message, /Path not found for sc-read:/);
+        assert.match(error.message, /Hint: run sc-resolve with that path to find close candidates\./);
+        assert.ok(error.message.length < 260, `message was ${error.message.length} chars`);
+        return true;
+      },
+    );
+  });
+
+  await it("adds a bounded sc-resolve hint when sc-snippets cannot find a path", async () => {
+    const missing = path.join(os.tmpdir(), "scl-snippets-missing-nope.txt");
+
+    await assert.rejects(
+      () => callTool("sc-snippets", { ranges: [{ path: missing, fromLine: 1, toLine: 2 }] }),
+      (error) => {
+        assert.equal(error.code, "ENOENT");
+        assert.match(error.message, /Path not found for sc-snippets:/);
+        assert.match(error.message, /Hint: run sc-resolve with that path to find close candidates\./);
+        assert.ok(error.message.length < 260, `message was ${error.message.length} chars`);
+        return true;
+      },
+    );
+  });
 });
 
 await describe("sc-read range mode", async () => {
@@ -231,6 +261,10 @@ await describe("sc-read compact range spec", async () => {
 
       assert.equal(result._meta.truncated, true);
       assert.match(result._meta.truncation.reason, /line/);
+      assert.match(result._meta.truncation.retryHint, /Split this pack/);
+      assert.match(result._meta.truncation.retryHint, /fewer or narrower ranges/);
+      assert.match(result._meta.truncation.retryHint, /maxLinesPerFile\/maxBytesPerFile/);
+      assert.match(result._meta.truncation.retryHint, /maxTotalLines\/maxTotalBytes/);
       assert.match(result.content[0].text, /truncated|omitted/);
     });
   });
@@ -307,6 +341,25 @@ await describe("sc-snippets focused range alias", async () => {
       assert.equal(result._meta.rangesRequested, 2);
       assert.match(result.content[0].text, /--- .*sample\.txt:1-1 ---\n1: one/);
       assert.match(result.content[0].text, /--- .*sample\.txt:4-4 ---\n4: four/);
+    });
+  });
+
+  await it("reports concrete truncation retry hints for snippet packs", async () => {
+    await withTempFile(Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n"), async (file) => {
+      const result = await callTool("sc-snippets", {
+        ranges: [
+          { path: file, fromLine: 1, toLine: 20 },
+          { path: file, fromLine: 21, toLine: 40 },
+        ],
+        maxTotalLines: 10,
+      });
+
+      assert.equal(result._meta.truncated, true);
+      assert.match(result._meta.truncation.retryHint, /Split this pack/);
+      assert.match(result._meta.truncation.retryHint, /fewer or narrower ranges/);
+      assert.match(result._meta.truncation.retryHint, /per-snippet caps/);
+      assert.match(result._meta.truncation.retryHint, /maxLinesPerFile\/maxBytesPerFile/);
+      assert.match(result._meta.truncation.retryHint, /maxTotalLines\/maxTotalBytes/);
     });
   });
 
@@ -406,6 +459,10 @@ await describe("sc-read ranges snippet packs", async () => {
 
       assert.equal(result._meta.truncated, true);
       assert.match(result._meta.truncation.reason, /line/);
+      assert.match(result._meta.truncation.retryHint, /Split this pack/);
+      assert.match(result._meta.truncation.retryHint, /fewer or narrower ranges/);
+      assert.match(result._meta.truncation.retryHint, /maxLinesPerFile\/maxBytesPerFile/);
+      assert.match(result._meta.truncation.retryHint, /maxTotalLines\/maxTotalBytes/);
       assert.match(result.content[0].text, /truncated|omitted/);
     });
   });

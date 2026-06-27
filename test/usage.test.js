@@ -8,7 +8,7 @@ const path = await import("node:path");
 const { execFileSync } = await import("node:child_process");
 const { describe, it } = await import("node:test");
 const { fileURLToPath } = await import("node:url");
-const { classifyCommand } = await import("../src/usage.js");
+const { classifyCommand, summarizeArgs } = await import("../src/usage.js");
 const { callTool, tools } = await import("../src/tools/registry.js");
 
 const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -62,6 +62,67 @@ await describe("usage command classification", async () => {
     assert.equal(classifyCommand("dotnet list package"), "dependencies");
     assert.equal(classifyCommand("npm ci"), "dependencies");
     assert.equal(classifyCommand("cargo tree"), "dependencies");
+  });
+});
+
+await describe("usage argument summarization", async () => {
+  await it("captures safe categorical metadata without raw sensitive values", () => {
+    const summary = summarizeArgs({
+      path: "src/secret-file.js",
+      paths: ["src/a.js", "src/b.js"],
+      ranges: [{ path: "secret", fromLine: 1, toLine: 3 }],
+      spec: "src/secret-file.js:1-10",
+      pattern: "password=.*",
+      include: "*.secret",
+      url: "https://example.test/private",
+      command: "echo private-token",
+      mode: "history",
+      engine: "text",
+      literal: true,
+      filesOnly: true,
+      staged: false,
+      stat: true,
+      fromLine: 12,
+      toLine: 24,
+      maxLinesPerFile: 40,
+      maxTotalLines: 100,
+      maxBytesPerFile: 2048,
+      maxTotalBytes: 4096,
+      maxCommits: 7,
+      maxFiles: 8,
+      maxHunks: 9,
+    });
+
+    assert.deepEqual(summary, {
+      path: "string",
+      pathsCount: 2,
+      paths: "array:2",
+      rangesCount: 1,
+      hasSpec: true,
+      specLengthBucket: "medium",
+      pattern: "string",
+      patternLengthBucket: "short",
+      include: "string",
+      includePresent: true,
+      url: "string",
+      hasCommand: true,
+      mode: "history",
+      engine: "text",
+      literal: true,
+      filesOnly: true,
+      staged: false,
+      stat: true,
+      hasFromLine: true,
+      hasToLine: true,
+      maxLinesPerFile: 40,
+      maxTotalLines: 100,
+      maxBytesPerFile: 2048,
+      maxTotalBytes: 4096,
+      maxCommits: 7,
+      maxFiles: 8,
+      maxHunks: 9,
+    });
+    assert.doesNotMatch(JSON.stringify(summary), /secret-file|password|private-token|example\.test/);
   });
 });
 
@@ -147,6 +208,25 @@ await describe("usage cross-project reports", async () => {
     const guidance = runUsageChild({ home: fixture.home, cwd: fixture.projectA, events: fixture.events, args: { mode: "guidance" } });
     assert.match(guidance.text, /sc-search literal:true/);
     assert.match(guidance.text, /use literal:true for plain strings or validate regex syntax/i);
+  });
+
+  await it("recommends search-plan/filesOnly then snippets for high search truncation", () => {
+    const fixture = createUsageFixture();
+    const events = [
+      event({ project: fixture.projectA, tool: "search", returnedBytes: 11000, truncated: true, args: { mode: "search", engine: "text", filesOnly: false, literal: false, patternLengthBucket: "medium" } }),
+      event({ project: fixture.projectA, tool: "search", returnedBytes: 12000, truncated: true, args: { mode: "search", engine: "text", filesOnly: false, literal: false, patternLengthBucket: "medium" } }),
+      event({ project: fixture.projectA, tool: "search", returnedBytes: 13000, truncated: true, args: { mode: "search", engine: "text", filesOnly: false, literal: false, patternLengthBucket: "medium" } }),
+    ];
+
+    const guidance = runUsageChild({ home: fixture.home, cwd: fixture.projectA, events, args: { mode: "guidance" } });
+    assert.match(guidance.text, /sc-search-plan or sc-search filesOnly:true/);
+    assert.match(guidance.text, /then use sc-snippets on selected ranges/i);
+    assert.match(guidance.text, /Truncation patterns:/);
+    assert.match(guidance.text, /sc-search \(mode=search, engine=text, filesOnly=false, literal=false\): 3 truncated/);
+
+    const report = runUsageChild({ home: fixture.home, cwd: fixture.projectA, events, args: { mode: "report" } });
+    assert.match(report.text, /Truncation patterns:/);
+    assert.match(report.text, /sc-search \(mode=search, engine=text, filesOnly=false, literal=false\): 3 truncated/);
   });
 });
 
